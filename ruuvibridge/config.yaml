@@ -1,0 +1,30 @@
+name: "RuuviBridge"
+version: "1.0.0"
+slug: "ruuvibridge"
+description: "Bridge for Ruuvi sensor data to Home Assistant (via MQTT discovery), InfluxDB, or Prometheus."
+arch:
+  - amd64
+  - aarch64
+  - armv7
+startup: services
+boot: auto
+init: false
+map:
+  - config:rw
+ports:
+  8484/tcp: 8484
+options:
+  mqtt_host: "mqtt://core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  homeassistant_discovery_prefix: "homeassistant"
+  log_level: "info"
+schema:
+  mqtt_host: str
+  mqtt_port: int
+  mqtt_username: str?
+  mqtt_password: str?
+  homeassistant_discovery_prefix: str
+  log_level: list(info|debug|warn|error)
+image: "ghcr.io/yourusername/ruuvibridge-{arch}"
