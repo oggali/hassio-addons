@@ -1,7 +1,7 @@
-name: "RuuviBridge"
-version: "1.0.0"
+name: "RuuviBridge hassio add-on"
+version: "25.10"
 slug: "ruuvibridge"
-description: "Bridge for Ruuvi sensor data to Home Assistant (via MQTT discovery), InfluxDB, or Prometheus."
+description: "Bridge for Ruuvi sensor data to Home Assistant, InfluxDB, or Prometheus."
 arch:
   - amd64
   - aarch64
@@ -12,19 +12,84 @@ init: false
 map:
   - config:rw
 ports:
-  8484/tcp: 8484
+  8080/tcp: 8080
+  8081/tcp: 8081
+  8585/tcp: 8585
 options:
-  mqtt_host: "mqtt://core-mosquitto"
-  mqtt_port: 1883
-  mqtt_username: ""
-  mqtt_password: ""
-  homeassistant_discovery_prefix: "homeassistant"
+  gateway_polling_enabled: false
+  gateway_url: "http://ip.or.hostname.of.the.gateway"
+  gateway_bearer_token: ""
+  gateway_interval: "10s"
+
+  mqtt_listener_enabled: false
+  mqtt_listener_broker_url: "tcp://ip.or.hostname:1883"
+  mqtt_listener_client_id: "RuuviBridgeListener"
+  mqtt_listener_username: "ruuvibridge"
+  mqtt_listener_password: "ruuvipassword"
+  mqtt_listener_topic_prefix: "ruuvi"
+
+  http_listener_enabled: false
+  http_listener_port: 8080
+
+  influxdb_enabled: false
+  influxdb_url: "http://localhost:8086"
+  influxdb_auth_token: "changethis"
+  influxdb_org: ""
+  influxdb_bucket: "ruuvi"
+  influxdb_measurement: "ruuvi_measurements"
+
+  prometheus_enabled: false
+  prometheus_port: 8081
+  prometheus_prefix: "ruuvi"
+
+  mqtt_publisher_enabled: false
+  mqtt_publisher_broker_url: "tcp://ip.or.hostname:1883"
+  mqtt_publisher_client_id: "RuuviBridgePublisher"
+  mqtt_publisher_username: "ruuvibridge"
+  mqtt_publisher_password: "ruuvipassword"
+  mqtt_publisher_topic_prefix: "ruuvibridge"
+
+  log_type: "structured"
   log_level: "info"
+  log_timestamps: true
+  debug: false
+
 schema:
-  mqtt_host: str
-  mqtt_port: int
-  mqtt_username: str?
-  mqtt_password: str?
-  homeassistant_discovery_prefix: str
-  log_level: list(info|debug|warn|error)
-#image: "ghcr.io/yourusername/ruuvibridge-{arch}"
+  gateway_polling_enabled: bool
+  gateway_url: str
+  gateway_bearer_token: str
+  gateway_interval: str
+
+  mqtt_listener_enabled: bool
+  mqtt_listener_broker_url: str
+  mqtt_listener_client_id: str
+  mqtt_listener_username: str
+  mqtt_listener_password: str
+  mqtt_listener_topic_prefix: str
+
+  http_listener_enabled: bool
+  http_listener_port: int
+
+  influxdb_enabled: bool
+  influxdb_url: str
+  influxdb_auth_token: str
+  influxdb_org: str
+  influxdb_bucket: str
+  influxdb_measurement: str
+
+  prometheus_enabled: bool
+  prometheus_port: int
+  prometheus_prefix: str
+
+  mqtt_publisher_enabled: bool
+  mqtt_publisher_broker_url: str
+  mqtt_publisher_client_id: str
+  mqtt_publisher_username: str
+  mqtt_publisher_password: str
+  mqtt_publisher_topic_prefix: str
+
+  log_type: list(structured|json)
+  log_level: list(trace|debug|info|warn|error|fatal|panic)
+  log_timestamps: bool
+  debug: bool
+# image: "ghcr.io/oggali/ruuvibridge-{arch}"

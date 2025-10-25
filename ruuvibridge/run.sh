@@ -1,27 +1,55 @@
 #!/usr/bin/with-contenv bashio
 set -e
 
+CONFIG_PATH="/data/config.yml"
 bashio::log.info "Generating configuration for RuuviBridge..."
 
-CONFIG_PATH="/data/config.yml"
-
 cat > "$CONFIG_PATH" <<EOF
-log_level: $(bashio::config 'log_level')
+gateway_polling:
+  enabled: $(bashio::config 'gateway_polling_enabled')
+  gateway_url: "$(bashio::config 'gateway_url')"
+  bearer_token: "$(bashio::config 'gateway_bearer_token')"
+  interval: $(bashio::config 'gateway_interval')
 
-mqtt:
-  host: $(bashio::config 'mqtt_host')
-  port: $(bashio::config 'mqtt_port')
-  username: $(bashio::config 'mqtt_username')
-  password: $(bashio::config 'mqtt_password')
+mqtt_listener:
+  enabled: $(bashio::config 'mqtt_listener_enabled')
+  broker_url: "$(bashio::config 'mqtt_listener_broker_url')"
+  client_id: "$(bashio::config 'mqtt_listener_client_id')"
+  username: "$(bashio::config 'mqtt_listener_username')"
+  password: "$(bashio::config 'mqtt_listener_password')"
+  topic_prefix: "$(bashio::config 'mqtt_listener_topic_prefix')"
 
-homeassistant_discovery_prefix: $(bashio::config 'homeassistant_discovery_prefix')
+http_listener:
+  enabled: $(bashio::config 'http_listener_enabled')
+  port: $(bashio::config 'http_listener_port')
 
-sources:
-  - type: ruuvitag_mqtt
+influxdb_publisher:
+  enabled: $(bashio::config 'influxdb_enabled')
+  url: "$(bashio::config 'influxdb_url')"
+  auth_token: "$(bashio::config 'influxdb_auth_token')"
+  org: "$(bashio::config 'influxdb_org')"
+  bucket: "$(bashio::config 'influxdb_bucket')"
+  measurement: "$(bashio::config 'influxdb_measurement')"
 
-sinks:
-  - type: mqtt_homeassistant
-    topic_prefix: $(bashio::config 'homeassistant_discovery_prefix')
+prometheus:
+  enabled: $(bashio::config 'prometheus_enabled')
+  port: $(bashio::config 'prometheus_port')
+  measurement_metric_prefix: "$(bashio::config 'prometheus_prefix')"
+
+mqtt_publisher:
+  enabled: $(bashio::config 'mqtt_publisher_enabled')
+  broker_url: "$(bashio::config 'mqtt_publisher_broker_url')"
+  client_id: "$(bashio::config 'mqtt_publisher_client_id')"
+  username: "$(bashio::config 'mqtt_publisher_username')"
+  password: "$(bashio::config 'mqtt_publisher_password')"
+  topic_prefix: "$(bashio::config 'mqtt_publisher_topic_prefix')"
+
+logging:
+  type: "$(bashio::config 'log_type')"
+  level: "$(bashio::config 'log_level')"
+  timestamps: $(bashio::config 'log_timestamps')
+
+debug: $(bashio::config 'debug')
 EOF
 
 bashio::log.info "Starting RuuviBridge..."
