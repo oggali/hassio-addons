@@ -27,4 +27,4 @@ schema:
   mqtt_password: str?
   homeassistant_discovery_prefix: str
   log_level: list(info|debug|warn|error)
-image: "ghcr.io/yourusername/ruuvibridge-{arch}"
+#image: "ghcr.io/yourusername/ruuvibridge-{arch}"

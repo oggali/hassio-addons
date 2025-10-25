@@ -17,7 +17,7 @@ It collects data from RuuviTags and publishes them to Home Assistant via MQTT Di
 
 ## Usage
 
-1. Add this repo to Home Assistant add-on store (Repository URL: `https://github.com/yourusername/hassio-addons`).
+1. Add this repo to Home Assistant add-on store (Repository URL: `https://github.com/oggali/hassio-addons`).
 2. Install the “RuuviBridge” add-on.
 3. Configure MQTT and start it.
 4. Sensors appear automatically via MQTT discovery.
