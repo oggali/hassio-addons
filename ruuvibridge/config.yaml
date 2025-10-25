@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10"
+version: "25.10.1"
 slug: "ruuvibridge"
 description: "Bridge for Ruuvi sensor data to Home Assistant, InfluxDB, or Prometheus."
 arch:
