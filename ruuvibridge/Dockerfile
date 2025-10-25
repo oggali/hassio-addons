@@ -3,16 +3,18 @@ FROM $BUILD_FROM
 
 RUN apk add --no-cache ca-certificates wget tar
 
-ENV RUUVI_VERSION=1.6.1
+# Remove or comment this line
+ENV RUUVI_VERSION=1.0.0
 
 ARG BUILD_ARCH
+ARG RUUVI_VERSION
 RUN case "${BUILD_ARCH}" in \
     "aarch64") ARCH="arm64";; \
     "armv7") ARCH="armv7";; \
     *) ARCH="amd64";; \
     esac && \
-    wget -O - https://github.com/Scrin/RuuviBridge/releases/download/v${RUUVI_VERSION}/RuuviBridge_linux_${ARCH}.tar.gz \
-    | tar xz -C /usr/local/bin && chmod +x /usr/local/bin/RuuviBridge
+    wget -O - https://github.com/Scrin/RuuviBridge/releases/download/v${RUUVI_VERSION}/ruuvibridge-v${RUUVI_VERSION}-linux-${ARCH}.tar.gz \
+    | tar xz -C /usr/local/bin && chmod +x /usr/local/bin/ruuvibridge
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
