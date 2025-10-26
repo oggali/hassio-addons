@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.1"
+version: "25.10.26"
 slug: "ruuvibridge"
 description: "Bridge for Ruuvi sensor data to Home Assistant, InfluxDB, or Prometheus."
 arch:
@@ -27,6 +27,9 @@ options:
   mqtt_listener_username: "ruuvibridge"
   mqtt_listener_password: "ruuvipassword"
   mqtt_listener_topic_prefix: "ruuvi"
+  mqtt_listener_lwt_topic: ""
+  mqtt_listener_lwt_online_payload: '{"state":"online"}'
+  mqtt_listener_lwt_offline_payload: '{"state":"offline"}'
 
   http_listener_enabled: false
   http_listener_port: 8080
@@ -48,6 +51,11 @@ options:
   mqtt_publisher_username: "ruuvibridge"
   mqtt_publisher_password: "ruuvipassword"
   mqtt_publisher_topic_prefix: "ruuvibridge"
+  mqtt_publisher_publish_raw: false
+  mqtt_publisher_lwt_topic: ""
+  mqtt_publisher_lwt_online_payload: '{"state":"online"}'
+  mqtt_publisher_lwt_offline_payload: '{"state":"offline"}'
+  mqtt_publisher_homeassistant_discovery_prefix: "homeassistant"
 
   log_type: "structured"
   log_level: "info"
@@ -57,22 +65,25 @@ options:
 schema:
   gateway_polling_enabled: bool
   gateway_url: str
-  gateway_bearer_token: str
+  gateway_bearer_token: password
   gateway_interval: str
 
   mqtt_listener_enabled: bool
   mqtt_listener_broker_url: str
   mqtt_listener_client_id: str
   mqtt_listener_username: str
-  mqtt_listener_password: str
+  mqtt_listener_password: password
   mqtt_listener_topic_prefix: str
+  mqtt_listener_lwt_topic: str
+  mqtt_listener_lwt_online_payload: str
+  mqtt_listener_lwt_offline_payload: str
 
   http_listener_enabled: bool
   http_listener_port: int
 
   influxdb_enabled: bool
   influxdb_url: str
-  influxdb_auth_token: str
+  influxdb_auth_token: password
   influxdb_org: str
   influxdb_bucket: str
   influxdb_measurement: str
@@ -85,8 +96,12 @@ schema:
   mqtt_publisher_broker_url: str
   mqtt_publisher_client_id: str
   mqtt_publisher_username: str
-  mqtt_publisher_password: str
+  mqtt_publisher_password: password
   mqtt_publisher_topic_prefix: str
+  mqtt_publisher_lwt_topic: str
+  mqtt_publisher_lwt_online_payload: str
+  mqtt_publisher_lwt_offline_payload: str
+  mqtt_publisher_homeassistant_discovery_prefix: str
 
   log_type: list(structured|json)
   log_level: list(trace|debug|info|warn|error|fatal|panic)

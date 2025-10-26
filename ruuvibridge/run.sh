@@ -18,6 +18,9 @@ mqtt_listener:
   username: "$(bashio::config 'mqtt_listener_username')"
   password: "$(bashio::config 'mqtt_listener_password')"
   topic_prefix: "$(bashio::config 'mqtt_listener_topic_prefix')"
+  lwt_topic: "$(bashio::config 'mqtt_listener_lwt_topic')"
+  lwt_online_payload: $(bashio::config 'mqtt_listener_lwt_online_payload')
+  lwt_offline_payload: $(bashio::config 'mqtt_listener_lwt_offline_payload')
 
 http_listener:
   enabled: $(bashio::config 'http_listener_enabled')
@@ -43,6 +46,10 @@ mqtt_publisher:
   username: "$(bashio::config 'mqtt_publisher_username')"
   password: "$(bashio::config 'mqtt_publisher_password')"
   topic_prefix: "$(bashio::config 'mqtt_publisher_topic_prefix')"
+  lwt_topic: "$(bashio::config 'mqtt_publisher_lwt_topic')"
+  lwt_online_payload: $(bashio::config 'mqtt_publisher_lwt_online_payload')
+  lwt_offline_payload: $(bashio::config 'mqtt_publisher_lwt_offline_payload')
+  homeassistant_discovery_prefix: "$(bashio::config 'mqtt_publisher_homeassistant_discovery_prefix')"
 
 logging:
   type: "$(bashio::config 'log_type')"
@@ -53,4 +60,4 @@ debug: $(bashio::config 'debug')
 EOF
 
 bashio::log.info "Starting RuuviBridge..."
-exec /usr/local/bin/RuuviBridge -config "$CONFIG_PATH"
+exec /usr/local/bin/ruuviBridge -config "$CONFIG_PATH"
