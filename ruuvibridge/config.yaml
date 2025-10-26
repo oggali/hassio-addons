@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26.8"
+version: "25.10.26.9"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -105,8 +105,8 @@ schema:
   mqtt_publisher_lwt_offline_payload: "str"
   mqtt_publisher_homeassistant_discovery_prefix: "str"
 
-  log_type: "list(structured|json)"
-  log_level: "list(trace|debug|info|warn|error|fatal|panic)"
+  log_type: "str"
+  log_level: "str"
   log_timestamps: "bool"
   debug: "bool"
 # image: "ghcr.io/oggali/ruuvibridge-{arch}"
