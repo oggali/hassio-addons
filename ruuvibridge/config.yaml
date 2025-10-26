@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26.4"
+version: "25.10.26.5"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
