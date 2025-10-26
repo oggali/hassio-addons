@@ -11,7 +11,8 @@ ARG RUUVI_VERSION
 RUN case "${BUILD_ARCH}" in \
     "aarch64") ARCH="arm64";; \
     "armv7") ARCH="armv7";; \
-    *) ARCH="amd64";; \
+    "amd64"|"x86_64") ARCH="amd64";; \
+    *) echo "Unsupported BUILD_ARCH: ${BUILD_ARCH}" && exit 1;; \
     esac && \
     wget -O - https://github.com/Scrin/RuuviBridge/releases/download/v${RUUVI_VERSION}/ruuvibridge-v${RUUVI_VERSION}-linux-${ARCH}.tar.gz \
     | tar xz -C /usr/local/bin && chmod +x /usr/local/bin/ruuvibridge
