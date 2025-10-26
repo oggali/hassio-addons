@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26.1"
+version: "25.10.26.2"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -99,6 +99,7 @@ schema:
   mqtt_publisher_username: str
   mqtt_publisher_password: password
   mqtt_publisher_topic_prefix: str
+  mqtt_publisher_publish_raw: bool
   mqtt_publisher_lwt_topic: str
   mqtt_publisher_lwt_online_payload: str
   mqtt_publisher_lwt_offline_payload: str

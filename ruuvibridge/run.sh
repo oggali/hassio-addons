@@ -46,6 +46,7 @@ mqtt_publisher:
   username: "$(bashio::config 'mqtt_publisher_username')"
   password: "$(bashio::config 'mqtt_publisher_password')"
   topic_prefix: "$(bashio::config 'mqtt_publisher_topic_prefix')"
+  publish_raw: $(bashio::config 'mqtt_publisher_publish_raw')
   lwt_topic: "$(bashio::config 'mqtt_publisher_lwt_topic')"
   lwt_online_payload: $(bashio::config 'mqtt_publisher_lwt_online_payload')
   lwt_offline_payload: $(bashio::config 'mqtt_publisher_lwt_offline_payload')
@@ -60,4 +61,4 @@ debug: $(bashio::config 'debug')
 EOF
 
 bashio::log.info "Starting ruuvibridge...."
-exec /usr/local/bin/ruuviBridge -config "$CONFIG_PATH"
+exec /usr/local/bin/ruuvibridge -config "$CONFIG_PATH"
