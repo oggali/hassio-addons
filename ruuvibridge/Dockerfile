@@ -1,7 +1,8 @@
-ARG BUILD_FROM=ghcr.io/hassio-addons/base-debian:15.0.5
+ARG BUILD_FROM=ghcr.io/hassio-addons/base:15.0.5
 FROM $BUILD_FROM
 
-RUN apk add --no-cache ca-certificates wget tar
+# Install dependencies and glibc compatibility
+RUN apk add --no-cache ca-certificates wget tar libc6-compat
 
 # Remove or comment this line
 ENV RUUVI_VERSION=1.0.0
