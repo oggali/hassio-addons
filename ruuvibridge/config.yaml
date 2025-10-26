@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26.9"
+version: "25.10.26.10"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -29,8 +29,8 @@ options:
   mqtt_listener_password: "ruuvipassword"
   mqtt_listener_topic_prefix: "ruuvi"
   mqtt_listener_lwt_topic: ""
-  mqtt_listener_lwt_online_payload: '{"state":"online"}'
-  mqtt_listener_lwt_offline_payload: '{"state":"offline"}'
+  mqtt_listener_lwt_online_payload: "{'state':'online'}"
+  mqtt_listener_lwt_offline_payload: "{'state':'offline'}"
 
   http_listener_enabled: false
   http_listener_port: 8080
@@ -54,8 +54,8 @@ options:
   mqtt_publisher_topic_prefix: "ruuvibridge"
   mqtt_publisher_publish_raw: false
   mqtt_publisher_lwt_topic: ""
-  mqtt_publisher_lwt_online_payload: '{"state":"online"}'
-  mqtt_publisher_lwt_offline_payload: '{"state":"offline"}'
+  mqtt_publisher_lwt_online_payload: "{'state':'online'}"
+  mqtt_publisher_lwt_offline_payload: "{'state':'offline'}"
   mqtt_publisher_homeassistant_discovery_prefix: "homeassistant"
 
   log_type: "structured"
@@ -105,8 +105,8 @@ schema:
   mqtt_publisher_lwt_offline_payload: "str"
   mqtt_publisher_homeassistant_discovery_prefix: "str"
 
-  log_type: "str"
-  log_level: "str"
+  log_type: "list(structured|json)"
+  log_level: "list(trace|debug|info|warn|error|fatal|panic)"
   log_timestamps: "bool"
   debug: "bool"
 # image: "ghcr.io/oggali/ruuvibridge-{arch}"
