@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/hassio-addons/base:15.0.5
+ARG BUILD_FROM=ghcr.io/hassio-addons/base-debian:15.0.5
 FROM $BUILD_FROM
 
 RUN apk add --no-cache ca-certificates wget tar
