@@ -59,5 +59,5 @@ logging:
 debug: $(bashio::config 'debug')
 EOF
 
-bashio::log.info "Starting RuuviBridge..."
+bashio::log.info "Starting ruuvibridge...."
 exec /usr/local/bin/ruuviBridge -config "$CONFIG_PATH"

@@ -1,7 +1,7 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26"
+version: "25.10.26.1"
 slug: "ruuvibridge"
-description: "Bridge for Ruuvi sensor data to Home Assistant, InfluxDB, or Prometheus."
+description: "Bridge for RuuviTag sensor data.."
 arch:
   - amd64
   - aarch64
@@ -12,8 +12,9 @@ init: false
 map:
   - config:rw
 ports:
-  8080/tcp: 8080
+  8883/tcp: 8883
   8081/tcp: 8081
+  8080/tcp: 8080
   8585/tcp: 8585
 options:
   gateway_polling_enabled: false
