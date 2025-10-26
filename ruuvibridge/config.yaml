@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26.6"
+version: "25.10.26.7"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -64,49 +64,99 @@ options:
   debug: false
 
 schema:
-  gateway_polling_enabled: bool
-  gateway_url: str
-  gateway_bearer_token: password
-  gateway_interval: str
+  gateway_polling_enabled:
+    type: boolean
+  gateway_url:
+    type: string
+  gateway_bearer_token:
+    type: password
+  gateway_interval:
+    type: string
 
-  mqtt_listener_enabled: bool
-  mqtt_listener_broker_url: str
-  mqtt_listener_client_id: str
-  mqtt_listener_username: str
-  mqtt_listener_password: password
-  mqtt_listener_topic_prefix: str
-  mqtt_listener_lwt_topic: str
-  mqtt_listener_lwt_online_payload: str
-  mqtt_listener_lwt_offline_payload: str
+  mqtt_listener_enabled:
+    type: boolean
+  mqtt_listener_broker_url:
+    type: string
+  mqtt_listener_client_id:
+    type: string
+  mqtt_listener_username:
+    type: string
+  mqtt_listener_password:
+    type: password
+  mqtt_listener_topic_prefix:
+    type: string
+  mqtt_listener_lwt_topic:
+    type: string
+  mqtt_listener_lwt_online_payload:
+    type: string
+  mqtt_listener_lwt_offline_payload:
+    type: string
 
-  http_listener_enabled: bool
-  http_listener_port: int
+  http_listener_enabled:
+    type: boolean
+  http_listener_port:
+    type: integer
 
-  influxdb_enabled: bool
-  influxdb_url: str
-  influxdb_auth_token: password
-  influxdb_org: str
-  influxdb_bucket: str
-  influxdb_measurement: str
+  influxdb_enabled:
+    type: boolean
+  influxdb_url:
+    type: string
+  influxdb_auth_token:
+    type: password
+  influxdb_org:
+    type: string
+  influxdb_bucket:
+    type: string
+  influxdb_measurement:
+    type: string
 
-  prometheus_enabled: bool
-  prometheus_port: int
-  prometheus_prefix: str
+  prometheus_enabled:
+    type: boolean
+  prometheus_port:
+    type: integer
+  prometheus_prefix:
+    type: string
 
-  mqtt_publisher_enabled: bool
-  mqtt_publisher_broker_url: str
-  mqtt_publisher_client_id: str
-  mqtt_publisher_username: str
-  mqtt_publisher_password: password
-  mqtt_publisher_topic_prefix: str
-  mqtt_publisher_publish_raw: bool
-  mqtt_publisher_lwt_topic: str
-  mqtt_publisher_lwt_online_payload: str
-  mqtt_publisher_lwt_offline_payload: str
-  mqtt_publisher_homeassistant_discovery_prefix: str
+  mqtt_publisher_enabled:
+    type: boolean
+  mqtt_publisher_broker_url:
+    type: string
+  mqtt_publisher_client_id:
+    type: string
+  mqtt_publisher_username:
+    type: string
+  mqtt_publisher_password:
+    type: password
+  mqtt_publisher_topic_prefix:
+    type: string
+  mqtt_publisher_publish_raw:
+    type: boolean
+  mqtt_publisher_lwt_topic:
+    type: string
+  mqtt_publisher_lwt_online_payload:
+    type: string
+  mqtt_publisher_lwt_offline_payload:
+    type: string
+  mqtt_publisher_homeassistant_discovery_prefix:
+    type: string
 
-  log_type: list(structured|json)
-  log_level: list(trace|debug|info|warn|error|fatal|panic)
-  log_timestamps: bool
-  debug: bool
+  log_type:
+    type: string
+    options:
+      - structured
+      - json
+  log_level:
+    type: string
+    options:
+      - trace
+      - debug
+      - info
+      - warn
+      - error
+      - fatal
+      - panic
+  log_timestamps:
+    type: boolean
+  debug:
+    type: boolean
 # image: "ghcr.io/oggali/ruuvibridge-{arch}"
