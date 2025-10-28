@@ -53,6 +53,12 @@ mqtt_publisher:
   lwt_offline_payload: "$(bashio::config 'mqtt_publisher_lwt_offline_payload')"
   homeassistant_discovery_prefix: $(bashio::config 'mqtt_publisher_homeassistant_discovery_prefix')
 
+processing:
+  extended_values: $(bashio::config 'processing_extended_values')
+  filter_mode: $(bashio::config 'processing_filter_mode')
+  disable_formats: $(bashio::config 'processing_disable_formats')
+  include_unofficial: $(bashio::config 'processing_include_unofficial')
+
 logging:
   type: "$(bashio::config 'log_type')"
   level: "$(bashio::config 'log_level')"

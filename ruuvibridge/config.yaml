@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.28.3"
+version: "25.10.28.4"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -62,6 +62,28 @@ options:
   mqtt_publisher_lwt_offline_payload: "{\"state\":\"offline\"}"
   mqtt_publisher_homeassistant_discovery_prefix: "homeassistant"
 
+  # Extra processing of the values
+
+  # Extended values are enabled by default but can be disabled by changing extended_values to false
+  processing_extended_values: true
+  # Filter which devices are considered. Valid options:
+  # none - no filtering is done, all devices are processed (default)
+  # named - only devices which have a name configured will be processed
+  # allowlist - only mac addresses listed in filter_list will be processed
+  # denylist - mac addresses listed in filter_list will be skipped
+  processing_filter_mode: none
+  # List of mac addresses to allow or deny if filter_mode is either allowlist or denylist
+#    filter_list:
+#      - FFEEDDCCBBAA
+#      - F0E1D2C3B4A5
+  # You can disable specific formats here, for example if you are able to receive format E1 you should
+  # disable format 6, as it's redundant in that case (E1 requires bluetooth 5 compatible hardware, for
+  # example the official Ruuvi Gateway).
+  processing_disable_formats:
+  #- "6"
+  # Flag to include unofficial data in the measurements. This is undocumented data that is included in some measurements sent by certain revisions of Ruuvi Air
+  processing_include_unofficial: false
+
   log_type: "structured"
   log_level: "info"
   log_timestamps: true
@@ -111,6 +133,11 @@ schema:
   mqtt_publisher_lwt_online_payload: "str"
   mqtt_publisher_lwt_offline_payload: "str"
   mqtt_publisher_homeassistant_discovery_prefix: "str"
+
+  processing_extended_values: "bool"
+  processing_filter_mode: "list(none|named|allowlist|denylist)"
+  processing_disable_formats: "str"
+  processing_include_unofficial: "bool"
 
   log_type: "list(structured|json)"
   log_level: "list(trace|debug|info|warn|error|fatal|panic)"
