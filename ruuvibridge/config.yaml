@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.26.11"
+version: "25.10.28"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -11,6 +11,8 @@ boot: auto
 init: false
 map:
   - config:rw
+  - addon_config:rw
+  - homeassistant_config:rw
 ports:
   8883/tcp: 8883
   8081/tcp: 8081
@@ -52,6 +54,7 @@ options:
   mqtt_publisher_username: "ruuvibridge"
   mqtt_publisher_password: "ruuvipassword"
   mqtt_publisher_topic_prefix: "ruuvibridge"
+  minimum_interval: 10s
   mqtt_publisher_publish_raw: false
   mqtt_publisher_lwt_topic: ""
   mqtt_publisher_lwt_online_payload: "{\"state\":\"online\"}"

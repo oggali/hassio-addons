@@ -19,8 +19,8 @@ mqtt_listener:
   password: "$(bashio::config 'mqtt_listener_password')"
   topic_prefix: "$(bashio::config 'mqtt_listener_topic_prefix')"
   lwt_topic: "$(bashio::config 'mqtt_listener_lwt_topic')"
-  lwt_online_payload: $(bashio::config 'mqtt_listener_lwt_online_payload')
-  lwt_offline_payload: $(bashio::config 'mqtt_listener_lwt_offline_payload')
+  lwt_online_payload: "$(bashio::config 'mqtt_listener_lwt_online_payload')"
+  lwt_offline_payload: "$(bashio::config 'mqtt_listener_lwt_offline_payload')"
 
 http_listener:
   enabled: $(bashio::config 'http_listener_enabled')
