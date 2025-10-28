@@ -1,5 +1,5 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.28"
+version: "25.10.28.1"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
@@ -10,9 +10,10 @@ startup: services
 boot: auto
 init: false
 map:
-  - config:rw
+#  - config:rw
   - addon_config:rw
   - homeassistant_config:rw
+  - all_addon_configs:rw
 ports:
   8883/tcp: 8883
   8081/tcp: 8081
@@ -64,6 +65,8 @@ options:
   log_type: "structured"
   log_level: "info"
   log_timestamps: true
+  # Whether to include the log caller in the logs. This will increase the size of logs but it helps in troubleshooting in some cases
+  with_caller: false
   debug: false
 
 schema:
@@ -111,5 +114,6 @@ schema:
   log_type: "list(structured|json)"
   log_level: "list(trace|debug|info|warn|error|fatal|panic)"
   log_timestamps: "bool"
+  with_caller: "bool"
   debug: "bool"
 # image: "ghcr.io/oggali/ruuvibridge-{arch}"

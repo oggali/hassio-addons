@@ -48,17 +48,20 @@ mqtt_publisher:
   topic_prefix: "$(bashio::config 'mqtt_publisher_topic_prefix')"
   publish_raw: $(bashio::config 'mqtt_publisher_publish_raw')
   lwt_topic: "$(bashio::config 'mqtt_publisher_lwt_topic')"
-  lwt_online_payload: $(bashio::config 'mqtt_publisher_lwt_online_payload')
-  lwt_offline_payload: $(bashio::config 'mqtt_publisher_lwt_offline_payload')
+  lwt_online_payload: "$(bashio::config 'mqtt_publisher_lwt_online_payload')"
+  lwt_offline_payload: "$(bashio::config 'mqtt_publisher_lwt_offline_payload')"
   homeassistant_discovery_prefix: "$(bashio::config 'mqtt_publisher_homeassistant_discovery_prefix')"
 
 logging:
   type: "$(bashio::config 'log_type')"
   level: "$(bashio::config 'log_level')"
   timestamps: $(bashio::config 'log_timestamps')
+  with_caller: $(bashio::config 'with_caller')
 
 debug: $(bashio::config 'debug')
 EOF
+bashio::log.info "Copy config from ...."
+cp /data/config.yml /homeassistant/config.yml
 
 bashio::log.info "Starting ruuvibridge...."
 exec /usr/local/bin/ruuvibridge -config "$CONFIG_PATH"
