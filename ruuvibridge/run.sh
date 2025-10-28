@@ -46,6 +46,7 @@ mqtt_publisher:
   username: "$(bashio::config 'mqtt_publisher_username')"
   password: "$(bashio::config 'mqtt_publisher_password')"
   topic_prefix: "$(bashio::config 'mqtt_publisher_topic_prefix')"
+  minimum_interval: "$(bashio::config 'minimum_interval')"
   publish_raw: $(bashio::config 'mqtt_publisher_publish_raw')
   lwt_topic: "$(bashio::config 'mqtt_publisher_lwt_topic')"
   lwt_online_payload: "$(bashio::config 'mqtt_publisher_lwt_online_payload')"
