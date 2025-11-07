@@ -1,0 +1,32 @@
+name: Herrfors Session Fetcher
+version: "2025.11.7"
+slug: herrfors_selenium
+description: "Fetch Herrfors session token with scheduled refresh windows."
+startup: services
+boot: auto
+homeassistant_api: true
+host_network: true
+
+
+options:
+  email: ""
+  password: ""
+  timezone: "UTC"
+  refresh_windows:
+    - "08:00-12:00"
+  check_interval: 300   # seconds between schedule checks
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+  run_immediately_on_start: true
+
+schema:
+  email: str
+  password: password
+  timezone: str
+  refresh_windows:
+    - str
+  check_interval: int
+  user_agent: str
+  run_immediately_on_start: bool
+
+map:
+  - share:rw
