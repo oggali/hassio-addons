@@ -1,27 +1,17 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
-FROM ${BUILD_FROM}
+FROM python:3.12-slim
 
-# Install OS packages
+# Chrome + Selenium dependencies
 RUN apt-get update && apt-get install -y \
-    wget \
-    ca-certificates \
-    unzip \
-    python3 \
-    python3-pip \
-    chromium \
-    chromium-driver \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    wget unzip xvfb chromium chromium-driver \
+    && apt-get clean
 
-# Install Python packages
-RUN pip3 install --no-cache-dir selenium webdriver-manager requests cryptography pytz
-
-# Copy addon files
 WORKDIR /app
+COPY app /app
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN chmod +x /app/main.py /app/refresh_server.py /app/decode_encode_toke.py /app/herrfors_session.py /run.sh
 COPY run.sh /run.sh
-COPY fetch_and_save.py /app/fetch_and_save.py
-COPY herrfors_session.py /app/herrfors_session.py
-COPY decode_token.py /app/decode_token.py
 RUN chmod +x /run.sh
 
-CMD [ "/run.sh" ]
-
+CMD ["/run.sh"]
