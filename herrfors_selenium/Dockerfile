@@ -10,7 +10,7 @@ COPY app /app
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN chmod +x /app/main.py /app/refresh_server.py /app/decode_encode_toke.py /app/herrfors_session.py /run.sh
+RUN chmod +x /app/main.py /app/refresh_server.py /app/decode_encode_token.py /app/herrfors_session.py /run.sh
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
