@@ -28,4 +28,4 @@ echo "⏱ check interval: ${check_interval}s, timezone: ${timezone}"
 echo "🔁 refresh windows: $(refresh_window_start) between $(refresh_window_end)"
 
 # Start Python application
-python3 app/main.py
+python3 /app/main.py
