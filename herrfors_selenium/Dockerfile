@@ -15,4 +15,4 @@ RUN chmod +x /app/main.py /app/refresh_server.py /app/decode_encode_token.py /ap
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-CMD ["/run.sh"]
+CMD ["run.sh"]
