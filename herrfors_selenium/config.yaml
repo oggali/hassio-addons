@@ -1,5 +1,5 @@
 name: Herrfors Session Fetcher
-version: "2025.11.9.2"
+version: "2025.11.9.3"
 slug: herrfors_selenium
 description: "Fetch Herrfors session token using headless Chrome + Selenium at scheduled times."
 arch:
@@ -8,6 +8,7 @@ arch:
   - armv7
 startup: services
 boot: auto
+init: false
 homeassistant_api: true
 host_network: true
 
