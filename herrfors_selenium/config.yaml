@@ -2,6 +2,10 @@ name: Herrfors Session Fetcher
 version: "2025.11.9.1"
 slug: herrfors_selenium
 description: "Fetch Herrfors session token using headless Chrome + Selenium at scheduled times."
+arch:
+  - amd64
+  - aarch64
+  - armv7
 startup: services
 boot: auto
 homeassistant_api: true
