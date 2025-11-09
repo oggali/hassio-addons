@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y \
     wget unzip xvfb chromium chromium-driver \
     && apt-get clean
 
-WORKDIR /app
+#WORKDIR /app
 COPY app /app
 
 
