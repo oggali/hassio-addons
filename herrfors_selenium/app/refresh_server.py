@@ -7,6 +7,7 @@ app = Flask(__name__)
 
 @app.route("/trigger-refresh", methods=["POST"])
 def trigger_refresh():
+    print("🔁 API refresh request received", flush=True)
     refresh_queue.put("refresh")
     return jsonify({"status": "scheduled"}), 200
 

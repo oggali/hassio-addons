@@ -57,7 +57,7 @@ def fetch_token(manual_override=False):
             if not expires:
                 print("Could not determine token expiry.")
                 expires = None
-
+            else:
                 ts = datetime.now(pytz.UTC).isoformat(timespec="seconds")
 
                 from decode_encode_token import encrypt_token
@@ -69,6 +69,7 @@ def fetch_token(manual_override=False):
                     "expires": expires,
                     "token": wrapped
                 }
+                log(f"Token expires in {datetime.fromisoformat(expires.replace("Z", "+00:00"))}")
                 Path(TOKEN_FILE).write_text(json.dumps(payload, indent=2))
                 print("Saved encrypted token to:", TOKEN_FILE)
         else:
