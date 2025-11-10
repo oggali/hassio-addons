@@ -25,7 +25,7 @@ export run_immediately
 echo "herrfors selenium add-on starting..."
 echo "using email: ${email}"
 echo "check interval: ${check_interval}s, timezone: ${timezone}"
-echo "refresh windows: ${refresh_window_start} → ${refresh_window_end}"
+echo "refresh windows: ${refresh_window_start} - ${refresh_window_end}"
 
 # Start Python application
 python3 /app/main.py
