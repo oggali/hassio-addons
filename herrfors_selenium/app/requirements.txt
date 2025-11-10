@@ -3,3 +3,4 @@ Flask
 pytz
 cryptography
 requests
+waitress

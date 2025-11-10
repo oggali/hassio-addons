@@ -30,6 +30,7 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-infobars")
+    options.add_argument("--single-process")
 
     options.add_argument("--disable-software-rasterizer")
 
@@ -37,12 +38,12 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
     service = Service("/usr/lib/chromium/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
 
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 60)
 
     try:
         if verbose: print("Opening identity page...")
         driver.get(LOGIN_URL)
-        time.sleep(1.5)
+        wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
 
         # username
         username_present = wait.until(EC.presence_of_element_located((By.NAME, "username")))
@@ -51,7 +52,7 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
             const el = document.querySelector('input[name="username"]');
             if (el) { el.focus(); el.value = arguments[0]; el.dispatchEvent(new Event('input', {bubbles: true})); }
         """, email)
-        time.sleep(0.3)
+        time.sleep(1)
         if verbose: print("username inserted...")
 
         # password
@@ -62,7 +63,7 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
             const el = document.querySelector('input[name="password"]');
             if (el) { el.focus(); el.value = arguments[0]; el.dispatchEvent(new Event('input', {bubbles: true})); }
         """, password)
-        time.sleep(0.3)
+        time.sleep(1)
 
         if verbose: print("password inserted...")
         # trigger validation
@@ -112,7 +113,27 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
         return None
 
     except Exception as e:
-        if verbose: print("Login error:", e)
+        if verbose:
+            print("Login error:", e)
+            traceback.print_exc()
+
+            # Save screenshot
+            try:
+                driver.save_screenshot("/share/herrfors_debug.png")
+                print("Saved screenshot to /share/herrfors_debug.png")
+            except:
+                print("Could not save screenshot")
+
+            # Save HTML
+            try:
+                with open("/share/herrfors_debug.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                print("Saved HTML to /share/herrfors_debug.html")
+            except:
+                print("Could not save HTML")
+
+            return None
+
         return None
 
     finally:

@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 from queue import Queue
+from waitress import serve
 
 refresh_queue = Queue()
 app = Flask(__name__)
@@ -10,4 +11,4 @@ def trigger_refresh():
     return jsonify({"status": "scheduled"}), 200
 
 def start_server():
-    app.run(host="0.0.0.0", port=8126)
+    serve(app, host="0.0.0.0", port=8126)
