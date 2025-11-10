@@ -8,6 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # from webdriver_manager.chrome import ChromeDriverManager
 
 import time
+import traceback
 
 LOGIN_URL = "https://identity.herrfors.fi/?locale=fi-FI"
 PORTAL_URL = "https://portal.herrfors.fi/fi-FI/charts"
