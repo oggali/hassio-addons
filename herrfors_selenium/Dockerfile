@@ -1,8 +1,8 @@
-FROM python:3.12-slim
+FROM ghcr.io/hassio-addons/base:15.0.5
 
 # Chrome + Selenium dependencies
 RUN apt-get update && apt-get install -y \
-    wget unzip xvfb chromium chromium-driver \
+    wget unzip xvfb chromium chromium-driver\
     && apt-get clean
 
 #WORKDIR /app
