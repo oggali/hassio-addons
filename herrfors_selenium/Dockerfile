@@ -11,9 +11,7 @@ RUN apk add --no-cache \
     py3-pip \
     py3-setuptools \
     py3-wheel \
-    py3-cryptography \
-    py3-requests \
-    py3-selenium
+
 
 #WORKDIR /app
 #COPY app /app
