@@ -1,5 +1,5 @@
 name: Herrfors Session Fetcher
-version: "2025.11.10.8"
+version: "2025.11.10.9"
 slug: herrfors_selenium
 description: "Fetch Herrfors session token using headless Chrome + Selenium at scheduled times."
 arch:
