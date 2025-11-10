@@ -1,14 +1,15 @@
-import os
-import time
-import threading
-from datetime import datetime, time as dtime, timedelta, timezone
 import json
+import os
+import threading
+import time
+from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
+
 import pytz
 import requests
 
-from refresh_server import start_server, refresh_queue
 from herrfors_session import get_herrfors_session_token
+from refresh_server import start_server, refresh_queue
 
 EMAIL = os.getenv("email")
 PASSWORD = os.getenv("password")
@@ -117,6 +118,10 @@ def background_worker():
             # Manual refresh always bypasses time window
             if not refresh_queue.empty():
                 refresh_queue.get()
+                # make sure queue is empty, there can be many in queue but one is enough
+                while not refresh_queue.empty():
+                    refresh_queue.get()
+                
                 log("🔄 Manual refresh request received — window ignored.")
                 fetch_token(True)
                 continue
