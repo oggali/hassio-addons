@@ -46,9 +46,9 @@ def fetch_expiration(session_cookie: str) -> str | None:
         return None
 
 def fetch_token():
-    log("Starting Selenium token fetch...")
 
     if not token_valid():
+        log("Starting Selenium token fetch...")
 
         raw_token = get_herrfors_session_token(EMAIL, PASSWORD, True, True)
         expires = fetch_expiration(raw_token)
@@ -69,6 +69,8 @@ def fetch_token():
         }
         Path(TOKEN_FILE).write_text(json.dumps(payload, indent=2))
         print("Saved encrypted token to:", TOKEN_FILE)
+    else:
+        log("Valid token found from file, no need to fetch it.")
 
 
 def token_valid():
