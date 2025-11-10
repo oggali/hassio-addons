@@ -52,24 +52,28 @@ def fetch_token(manual_override=False):
         log("Starting Selenium token fetch...")
 
         raw_token = get_herrfors_session_token(EMAIL, PASSWORD, True, True)
-        expires = fetch_expiration(raw_token)
-        if not expires:
-            print("Could not determine token expiry; will still store token without expires.")
-            expires = None
+        if raw_token:
+            expires = fetch_expiration(raw_token)
+            if not expires:
+                print("Could not determine token expiry.")
+                expires = None
 
-        ts = datetime.now(pytz.UTC).isoformat(timespec="seconds")
+                ts = datetime.now(pytz.UTC).isoformat(timespec="seconds")
 
-        from decode_encode_token import encrypt_token
-        encrypted = encrypt_token(raw_token, EMAIL, PASSWORD)
-        wrapped = f"{ts}:{encrypted}"
+                from decode_encode_token import encrypt_token
+                encrypted = encrypt_token(raw_token, EMAIL, PASSWORD)
+                wrapped = f"{ts}:{encrypted}"
 
-        payload = {
-            "token_timestamp": ts,
-            "expires": expires,
-            "token": wrapped
-        }
-        Path(TOKEN_FILE).write_text(json.dumps(payload, indent=2))
-        print("Saved encrypted token to:", TOKEN_FILE)
+                payload = {
+                    "token_timestamp": ts,
+                    "expires": expires,
+                    "token": wrapped
+                }
+                Path(TOKEN_FILE).write_text(json.dumps(payload, indent=2))
+                print("Saved encrypted token to:", TOKEN_FILE)
+        else:
+            log(f"Could not fetch token: {raw_token}")
+            log(f"Let's check old token saved. Valid {token_valid()}")
     else:
         log("Valid token found from file, no need to fetch it.")
 
@@ -87,7 +91,8 @@ def token_valid():
         if not exp:
             return False
         dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
-        return datetime.now(timezone.utc) + timedelta(seconds=REFRESH_INTERVAL) < dt
+        log(f"Token expires in {dt}")
+        return datetime.now(timezone.utc) + timedelta(seconds=3*REFRESH_INTERVAL) < dt
 
     except Exception as ex:
         log(f"⚠️ Token check failed: {ex}")

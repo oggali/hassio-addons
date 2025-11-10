@@ -52,9 +52,11 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
             if (el) { el.focus(); el.value = arguments[0]; el.dispatchEvent(new Event('input', {bubbles: true})); }
         """, email)
         time.sleep(0.3)
+        if verbose: print("username inserted...")
 
         # password
         password_present = wait.until(EC.presence_of_element_located((By.NAME, "password")))
+        if verbose: print("Waiting password field...")
         wait.until(lambda d: password_present.is_displayed() and password_present.is_enabled())
         driver.execute_script("""
             const el = document.querySelector('input[name="password"]');
@@ -62,6 +64,7 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
         """, password)
         time.sleep(0.3)
 
+        if verbose: print("password inserted...")
         # trigger validation
         driver.execute_script("""
             const pw = document.querySelector('input[name="password"]');
