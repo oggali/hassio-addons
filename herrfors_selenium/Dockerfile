@@ -1,9 +1,19 @@
 FROM ghcr.io/hassio-addons/base:15.0.5
 
-# Chrome + Selenium dependencies
-RUN apt-get update && apt-get install -y \
-    wget unzip xvfb chromium chromium-driver\
-    && apt-get clean
+# Install dependencies for Selenium + Chromium
+RUN apk add --no-cache \
+    bash \
+    chromium \
+    chromium-chromedriver \
+    xvfb \
+    unzip \
+    wget \
+    py3-pip \
+    py3-setuptools \
+    py3-wheel \
+    py3-cryptography \
+    py3-requests \
+    py3-selenium
 
 #WORKDIR /app
 #COPY app /app
