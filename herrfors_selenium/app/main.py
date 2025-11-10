@@ -22,7 +22,7 @@ RUN_IN_START = bool(os.getenv("run_immediately", "false"))
 
 
 def log(msg):
-    print(f"[Herrfors] {msg}", flush=True)
+    print(f"[Herrfors] {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S%z')} {msg}", flush=True)
 
 
 def parse_time(tstr):
@@ -45,9 +45,10 @@ def fetch_expiration(session_cookie: str) -> str | None:
         print("Error fetching expiry:", e)
         return None
 
-def fetch_token():
+def fetch_token(manual_override=False):
 
-    if not token_valid():
+    if not token_valid() or manual_override:
+        log(f"Manually override {manual_override}")
         log("Starting Selenium token fetch...")
 
         raw_token = get_herrfors_session_token(EMAIL, PASSWORD, True, True)
@@ -111,17 +112,19 @@ def background_worker():
             if not refresh_queue.empty():
                 refresh_queue.get()
                 log("🔄 Manual refresh request received — window ignored.")
-                fetch_token()
+                fetch_token(True)
                 continue
 
             # Automatic refresh respects time window
-            if within_refresh_window():
+            elif within_refresh_window():
                 log("⏰ Inside refresh window — performing scheduled refresh.")
-                fetch_token()
+                fetch_token(False)
+                time.sleep(REFRESH_INTERVAL)
             else:
                 log("⛔ Outside refresh window — skipping refresh.")
+                time.sleep(REFRESH_INTERVAL)
 
-            time.sleep(REFRESH_INTERVAL * 60)
+            time.sleep(60)
 
         except Exception as ex:
             log(f"Error: {ex}")
