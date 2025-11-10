@@ -10,7 +10,7 @@ RUN apk add --no-cache \
     wget \
     py3-pip \
     py3-setuptools \
-    py3-wheel \
+    py3-wheel
 
 
 #WORKDIR /app
