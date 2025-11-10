@@ -5,7 +5,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+# from webdriver_manager.chrome import ChromeDriverManager
+
 import time
 
 LOGIN_URL = "https://identity.herrfors.fi/?locale=fi-FI"
@@ -30,8 +31,12 @@ def get_herrfors_session_token(email: str, password: str, headless: bool = True,
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-infobars")
 
-    service = Service(ChromeDriverManager().install())
+    options.add_argument("--disable-software-rasterizer")
+
+    # service = Service(ChromeDriverManager().install())
+    service = Service("/usr/lib/chromium/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
+
     wait = WebDriverWait(driver, 20)
 
     try:
