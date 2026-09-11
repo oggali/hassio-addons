@@ -25,6 +25,7 @@ GARMIN_HRV_NIGHT = "sensor.garmin_connect_hrv_last_night_average"
 GARMIN_HRV_BASELINE = "sensor.garmin_connect_hrv_baseline"
 GARMIN_LAST_WORKOUT = "sensor.garmin_connect_last_workout"
 GARMIN_SLEEP_SCORE = "sensor.sleep_score"
+STRAVA_LATEST_SPLITS = "sensor.strava_latest_splits"
 
 SESSION_SENSOR = "sensor.training_coach_session"
 SUMMARY_SENSOR = "sensor.training_coach_summary"
@@ -89,6 +90,7 @@ def recovery_entity_ids() -> list[str]:
         GARMIN_HRV_BASELINE,
         GARMIN_LAST_WORKOUT,
         GARMIN_SLEEP_SCORE,
+        STRAVA_LATEST_SPLITS,
     ]
 
 

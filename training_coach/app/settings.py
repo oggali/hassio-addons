@@ -35,7 +35,8 @@ class Settings:
     weekly_strength: int = 2
     weekly_rest_days: int = 1
     long_run_min_minutes: int = 75
-    decisions_path: str = "/data/decisions.jsonl"
+    db_path: str = "/data/coach.duckdb"
+    history_seed_days: int = 365
 
     @property
     def tz(self) -> ZoneInfo:
@@ -66,5 +67,6 @@ class Settings:
             weekly_strength=_env_int("WEEKLY_STRENGTH", 2),
             weekly_rest_days=_env_int("WEEKLY_REST_DAYS", 1),
             long_run_min_minutes=_env_int("LONG_RUN_MIN_MINUTES", 75),
-            decisions_path=os.environ.get("DECISIONS_PATH", "/data/decisions.jsonl"),
+            db_path=os.environ.get("DB_PATH", "/data/coach.duckdb"),
+            history_seed_days=_env_int("HISTORY_SEED_DAYS", 365),
         )

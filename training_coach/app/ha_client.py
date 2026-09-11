@@ -86,15 +86,18 @@ class HomeAssistantClient:
         entity_ids: list[str],
         start: datetime,
         end: datetime | None = None,
+        *,
+        include_attributes: bool = False,
     ) -> list[list[dict[str, Any]]]:
         if not entity_ids:
             return []
         start_utc = start.astimezone(timezone.utc)
         params = {
             "filter_entity_id": ",".join(entity_ids),
-            "minimal_response": "true",
-            "significant_changes_only": "true",
         }
+        if not include_attributes:
+            params["minimal_response"] = "true"
+            params["significant_changes_only"] = "true"
         if end is not None:
             params["end_time"] = end.astimezone(timezone.utc).isoformat()
         url = f"{self.base_url}/history/period/{quote(start_utc.isoformat())}"

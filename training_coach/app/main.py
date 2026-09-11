@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import select
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,12 +12,12 @@ from pathlib import Path
 # Allow `python3 /app/main.py` and `python3 main.py` from this folder.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from entities import SESSION_SENSOR, SUMMARY_SENSOR, tracked_entity_ids
-from features import build_snapshot
+from entities import SESSION_SENSOR, STRAVA_LATEST_SPLITS, SUMMARY_SENSOR, tracked_entity_ids
+from features import build_snapshot, collect_live_sessions
 from ha_client import HomeAssistantClient
-from persist import append_decision
 from planner import Plan, plan_day
 from settings import Settings
+from store import CoachStore
 
 
 def log(message: str) -> None:
@@ -52,17 +54,33 @@ def wait_for_oura(client: HomeAssistantClient, settings: Settings) -> dict:
         time.sleep(max(5, settings.poll_seconds))
 
 
-def history_fallback(client: HomeAssistantClient, settings: Settings):
-    start = datetime.now(settings.tz) - timedelta(days=28)
+def seed_history(client: HomeAssistantClient, settings: Settings, store: CoachStore) -> int:
+    start = datetime.now(settings.tz) - timedelta(days=settings.history_seed_days)
     entity_ids = [
         f"{settings.strava_entity_prefix}_run_date",
         f"{settings.strava_entity_prefix}_weight_training_date",
     ]
+    history = None
+    split_hist = None
     try:
-        return client.get_history(entity_ids, start)
+        history = client.get_history(entity_ids, start)
     except Exception as exc:  # noqa: BLE001
-        log(f"History fetch failed: {exc}")
-        return None
+        log(f"History seed (dates) failed: {exc}")
+    try:
+        split_hist = client.get_history(
+            [STRAVA_LATEST_SPLITS],
+            start,
+            include_attributes=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"History seed (splits) failed: {exc}")
+    # Live states empty dict is fine — seed only uses history/split_history paths.
+    states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
+    sessions = collect_live_sessions(states, settings, history=history, split_history=split_hist)
+    n = store.upsert_sessions(sessions)
+    store.mark_history_seeded()
+    log(f"Seeded {n} sessions from HA history ({settings.history_seed_days}d lookback)")
+    return n
 
 
 def publish_plan(client: HomeAssistantClient, plan: Plan) -> None:
@@ -107,47 +125,107 @@ def notify_plan(client: HomeAssistantClient, settings: Settings, plan: Plan) -> 
         log(f"Notify failed: {exc}")
 
 
-def run_once(client: HomeAssistantClient, settings: Settings, wait_oura: bool) -> Plan:
+def run_once(client: HomeAssistantClient, settings: Settings, store: CoachStore, wait_oura: bool) -> Plan:
     if wait_oura:
         states = wait_for_oura(client, settings)
     else:
         states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
-    history = history_fallback(client, settings)
-    snapshot = build_snapshot(states, settings, history=history)
+
+    live = collect_live_sessions(states, settings)
+    store.upsert_sessions(live)
+    log(f"Upserted {len(live)} live sessions")
+
+    if store.needs_history_seed():
+        seed_history(client, settings, store)
+
+    sessions = store.load_sessions()
+    snapshot = build_snapshot(states, settings, sessions=sessions)
     plan = plan_day(snapshot, settings)
     publish_plan(client, plan)
     notify_plan(client, settings, plan)
+
     extra = {
         "oura_readiness": snapshot.recovery.oura_readiness,
         "oura_sleep": snapshot.recovery.oura_sleep,
         "reasons": snapshot.recovery.reasons,
         "session_titles": [s.title for s in snapshot.sessions[:10]],
+        "split_activity_ids": [s.activity_id for s in snapshot.sessions[:10] if s.activity_id],
     }
     try:
-        append_decision(settings.decisions_path, plan, extra)
+        store.upsert_recovery(
+            snapshot.today,
+            snapshot.recovery,
+            oura_synced_today=snapshot.oura_synced_today,
+            already_trained_today=snapshot.already_trained_today,
+        )
+        store.upsert_decision(snapshot.today, plan, settings, snapshot.sessions, extra)
     except Exception as exc:  # noqa: BLE001
-        log(f"Could not persist decision: {exc}")
+        log(f"Could not persist coaching facts: {exc}")
     log(f"Plan: {plan.session_type} ({plan.recovery_band}) — {plan.why}")
     return plan
 
 
+def stdin_wipe_loop(wipe_requested: threading.Event) -> None:
+    """Handle hassio.addon_stdin commands (one line per command)."""
+    while True:
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], 1.0)
+        except (ValueError, OSError):
+            time.sleep(1.0)
+            continue
+        if not ready:
+            continue
+        line = sys.stdin.readline()
+        if line == "":
+            time.sleep(1.0)
+            continue
+        cmd = line.strip().lower()
+        if cmd == "wipe_db":
+            log("Received wipe_db via stdin; scheduling DuckDB wipe")
+            wipe_requested.set()
+        elif cmd:
+            log(f"Unknown stdin command: {cmd!r} (supported: wipe_db)")
+
+
 def main() -> None:
     settings = Settings.from_env()
-    log(f"timezone={settings.timezone} run_time={settings.run_time}")
+    log(f"timezone={settings.timezone} run_time={settings.run_time} db={settings.db_path}")
     client = HomeAssistantClient()
+    store = CoachStore(settings.db_path)
+    wipe_requested = threading.Event()
+    threading.Thread(target=stdin_wipe_loop, args=(wipe_requested,), daemon=True).start()
     ran_startup = False
     while True:
         now = datetime.now(settings.tz)
+        if wipe_requested.is_set():
+            wipe_requested.clear()
+            log("Wiping local DuckDB")
+            try:
+                store.wipe()
+                log("DuckDB wiped; re-seeding and planning")
+            except Exception as exc:  # noqa: BLE001
+                log(f"Wipe failed: {exc}")
+            else:
+                run_once(client, settings, store, wait_oura=False)
+                continue
         if settings.run_immediately and not ran_startup:
             log("Running immediately on start")
-            run_once(client, settings, wait_oura=False)
+            run_once(client, settings, store, wait_oura=False)
             ran_startup = True
-        sleep_s = seconds_until_run(now, settings.run_time)
+        sleep_s = seconds_until_run(datetime.now(settings.tz), settings.run_time)
         log(f"Sleeping {int(sleep_s)}s until {settings.run_time}")
-        time.sleep(sleep_s)
-        run_once(client, settings, wait_oura=True)
-        # Avoid a double-run if the job finishes before the clock leaves run_time.
-        time.sleep(60)
+        deadline = time.monotonic() + sleep_s
+        while time.monotonic() < deadline:
+            if wipe_requested.is_set():
+                break
+            time.sleep(min(5.0, max(0.1, deadline - time.monotonic())))
+        else:
+            run_once(client, settings, store, wait_oura=True)
+            # Avoid a double-run if the job finishes before the clock leaves run_time.
+            time.sleep(60)
+            continue
+        # wipe_requested set during sleep — loop back to wipe handler
+        continue
 
 
 if __name__ == "__main__":

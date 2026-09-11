@@ -24,10 +24,12 @@ from entities import (
     OURA_SLEEP_HRV,
     OURA_TEMP,
     OURA_WORKOUTS_TODAY,
+    STRAVA_LATEST_SPLITS,
     all_strava_slot_ids,
 )
 from parse import last_updated, parse_bool, parse_date, parse_float, state_value
 from settings import Settings
+from splits import apply_splits_to_sessions, collect_split_sets
 
 
 @dataclass
@@ -256,23 +258,44 @@ def oura_is_synced_today(states: dict[str, dict[str, Any]], tz: ZoneInfo, today:
     return bool(sleep_updated and sleep_updated.date() == today)
 
 
-def build_snapshot(
+def collect_live_sessions(
     states: dict[str, dict[str, Any]],
     settings: Settings,
-    now: datetime | None = None,
     history: list[list[dict[str, Any]]] | None = None,
-) -> FeatureSnapshot:
-    now = now or datetime.now(settings.tz)
-    today = now.date()
-    recovery = score_recovery(states)
+    split_history: list[list[dict[str, Any]]] | None = None,
+) -> list[Session]:
+    """Classify sessions from current HA states (and optional one-shot history seed)."""
     sessions = collect_strava_sessions(states, settings)
     if history:
         sessions = merge_history_sessions(
             sessions, history, settings.tz, settings.long_run_min_minutes
         )
+    split_sets = collect_split_sets(
+        states.get(STRAVA_LATEST_SPLITS),
+        split_history,
+        settings.tz,
+    )
+    if split_sets:
+        sessions = apply_splits_to_sessions(sessions, split_sets, settings.long_run_min_minutes)
+    return sessions
+
+
+def build_snapshot(
+    states: dict[str, dict[str, Any]],
+    settings: Settings,
+    now: datetime | None = None,
+    history: list[list[dict[str, Any]]] | None = None,
+    split_history: list[list[dict[str, Any]]] | None = None,
+    sessions: list[Session] | None = None,
+) -> FeatureSnapshot:
+    now = now or datetime.now(settings.tz)
+    today = now.date()
+    recovery = score_recovery(states)
+    if sessions is None:
+        sessions = collect_live_sessions(states, settings, history, split_history)
     workouts_today = parse_float(state_value(states.get(OURA_WORKOUTS_TODAY))) or 0
     already = any(s.when == today for s in sessions) or workouts_today >= 1
-    sessions.sort(key=lambda s: s.when or date.min, reverse=True)
+    sessions = sorted(sessions, key=lambda s: s.when or date.min, reverse=True)
     return FeatureSnapshot(
         now=now,
         today=today,

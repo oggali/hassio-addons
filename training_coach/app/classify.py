@@ -51,6 +51,8 @@ class Session:
     avg_hr: float | None = None
     max_hr: float | None = None
     source: str = "strava"
+    activity_id: str | None = None
+    splits: list | None = None
 
 
 def _norm(value: Any) -> str:
@@ -67,16 +69,21 @@ def classify_run(
     avg_hr: float | None,
     max_hr: float | None,
     long_run_min_minutes: int,
+    splits_hint: str | None = None,
 ) -> str:
     blob = _norm(title)
     if _contains_any(blob, INTERVAL_KEYWORDS):
         return INTERVALS
     if _contains_any(blob, TEMPO_KEYWORDS):
         return TEMPO
+    if splits_hint in {INTERVALS, TEMPO}:
+        return splits_hint
     if _contains_any(blob, LONG_KEYWORDS):
         return LONG_RUN
     if _contains_any(blob, EASY_KEYWORDS):
         return EASY_RUN
+    if splits_hint:
+        return splits_hint
     if duration_min is not None and duration_min >= long_run_min_minutes:
         return LONG_RUN
     peak = max_hr or 190.0
@@ -128,6 +135,9 @@ def session_from_strava_slot(
         return None
     attrs = (activity_entity or {}).get("attributes") or {}
     sport = str(attrs.get("sport_type") or attrs.get("activity_type") or "")
+    activity_id = attrs.get("activity_id")
+    if activity_id is not None:
+        activity_id = str(activity_id)
     when = parse_date(state_value(date_entity) or attrs.get("date"), tz)
     duration = parse_duration_minutes(state_value(moving_entity)) or parse_duration_minutes(
         state_value(elapsed_entity)
@@ -150,4 +160,5 @@ def session_from_strava_slot(
         avg_hr=parse_float(state_value(avg_hr_entity)),
         max_hr=parse_float(state_value(max_hr_entity)),
         source="strava",
+        activity_id=activity_id,
     )

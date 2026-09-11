@@ -20,19 +20,40 @@ Hard sessions are `intervals` and `tempo`. A long run is taxing but not a qualit
 ## How it decides
 
 1. **Recovery band** (`poor` / `ok` / `good`) from Oura (primary) and Garmin (confirm): readiness, sleep, HRV vs baseline, temperature deviation, body battery, recovery time, rest mode.
-2. **Last week’s sessions** from Strava’s 10 recent-activity slots (`sensor.strava_*_recent_activity` … `_10`). HA history of run / weight-training dates is a fallback if a session has rolled off.
+2. **Sessions** from a local DuckDB warehouse of normalized coaching facts (classified Strava activities + splits). Live Strava slots and current splits are upserted each run. HA recorder history is used only once to **seed** the DB (365-day lookback on first start or after wipe), not re-pulled every morning.
 3. **Weekly targets** (configurable): 1 long, 1 quality (intervals or tempo, alternating), 2 strength, 1 rest, remaining easy.
 4. **Gates**: rest mode or poor recovery → rest. No hard session within 48 hours of a hard or long day. Strength is preferred when recovery is only okay.
 
 Each recommendation includes a short **why**.
+
+## Local DuckDB store
+
+Path: `/data/coach.duckdb` (kept forever; no auto-prune).
+
+| Table | What |
+|---|---|
+| `sessions` | Classified workouts (type, title, sport, date, duration, distance, HR, splits) |
+| `recovery_daily` | Morning recovery snapshot used for the plan |
+| `decisions` | Published plan + settings / session fingerprint for later feedback |
+
+### Wipe and re-seed
+
+To clear the local store and rebuild from HA history:
+
+```yaml
+service: hassio.addon_stdin
+data:
+  addon: local_training_coach
+  input: wipe_db
+```
+
+Use your real add-on slug if it differs (Supervisor → Add-on → Info). After wipe, the next plan run re-seeds with a 365-day history lookback.
 
 ## Home Assistant entities created
 
 - `sensor.training_coach_session` — `rest` / `easy_run` / `long_run` / `intervals` / `tempo` / `strength`  
   Attributes: `title`, `details`, `duration_min`, `why`, `recovery_band`, `yesterday`, `week_counts`
 - `sensor.training_coach_summary` — human-readable title plus full text in `text`
-
-Decisions are appended to `/data/decisions.jsonl` inside the add-on for later feedback or ML.
 
 ## Configuration
 
@@ -60,6 +81,8 @@ Oura: `sensor.oura_ring_readiness_score`, `sensor.oura_ring_sleep_score`, `senso
 Garmin: `sensor.garmin_connect_training_readiness`, `sensor.garmin_connect_morning_training_readiness`, `sensor.garmin_connect_recovery_time`, `sensor.body_battery_most_recent`, `sensor.hrv_status`, `sensor.garmin_connect_hrv_last_night_average`, `sensor.garmin_connect_hrv_baseline`
 
 Strava: `sensor.strava_oskari_vuorinen_recent_activity` and `_2` … `_10`, plus `_date`, `_distance`, `_moving_time`, `_elapsed_time`, `_average_heartrate`, `_max_heartrate`
+
+Splits: `sensor.strava_latest_splits` (pyscript). State is the latest run’s split count; attributes `splits_metric` / `laps` / `activity_id` / `activity_name`. Older activities are seeded from recorder history into DuckDB once.
 
 ## Installation
 

@@ -1,14 +1,14 @@
 name: Training Coach
-version: "2026.08.23"
+version: "2026.09.11"
 slug: training_coach
 description: "Morning training recommendation from Oura, Garmin, and Strava."
 arch:
   - amd64
   - aarch64
-  - armv7
 startup: services
 boot: auto
 init: false
+stdin: true
 homeassistant_api: true
 map:
   - addon_config:rw
