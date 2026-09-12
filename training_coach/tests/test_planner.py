@@ -11,7 +11,21 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(ROOT))
 
-from classify import EASY_RUN, INTERVALS, LONG_RUN, REST, STRENGTH, TEMPO, classify_run  # noqa: E402
+from classify import (  # noqa: E402
+    CROSS_EASY,
+    CROSS_HARD,
+    CROSS_LONG,
+    EASY_RUN,
+    INTERVALS,
+    LONG_RUN,
+    OTHER,
+    REST,
+    STRENGTH,
+    TEMPO,
+    Session,
+    classify_run,
+    classify_sport,
+)
 from entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
@@ -26,6 +40,7 @@ from entities import (  # noqa: E402
     strava_slot_ids,
 )
 from features import build_snapshot  # noqa: E402
+from load import session_load  # noqa: E402
 from planner import plan_day  # noqa: E402
 from settings import Settings  # noqa: E402
 
@@ -90,6 +105,37 @@ class ClassifyTests(unittest.TestCase):
 
     def test_long_from_duration(self):
         self.assertEqual(classify_run("Afternoon run", 95, 140, 170, 75), LONG_RUN)
+
+    def test_bike_effort_from_title_and_hr(self):
+        self.assertEqual(classify_sport("Ride", "Easy commute", 35, 118, 140, 75), CROSS_EASY)
+        self.assertEqual(classify_sport("Ride", "Zwift intervals", 50, 155, 178, 75), CROSS_HARD)
+        self.assertEqual(classify_sport("VirtualRide", "Morning Ride", 45, 160, 180, 75), CROSS_HARD)
+        self.assertEqual(classify_sport("Ride", "Sunday ride", 130, 128, 155, 75), CROSS_LONG)
+
+    def test_hard_bike_load_exceeds_easy(self):
+        easy = Session(CROSS_EASY, "commute", "Ride", SATURDAY.date(), duration_min=60)
+        hard = Session(CROSS_HARD, "intervals", "Ride", SATURDAY.date(), duration_min=60)
+        self.assertGreater(session_load(hard), session_load(easy))
+
+    def test_nordic_ski_effort_from_title_and_hr(self):
+        self.assertEqual(
+            classify_sport("NordicSki", "Easy classic", 50, 125, 155, 75), CROSS_EASY
+        )
+        self.assertEqual(
+            classify_sport("NordicSki", "Skate intervals", 45, 162, 180, 75), CROSS_HARD
+        )
+        self.assertEqual(
+            classify_sport("RollerSki", "Skate VO2", 40, 160, 178, 75), CROSS_HARD
+        )
+        self.assertEqual(
+            classify_sport("NordicSki", "Sunday skate", 90, 132, 160, 75), CROSS_LONG
+        )
+        self.assertEqual(classify_sport("AlpineSki", "Downhill day", 180, 110, 140, 75), OTHER)
+
+    def test_ski_load_exceeds_same_bike(self):
+        bike = Session(CROSS_HARD, "intervals", "Ride", SATURDAY.date(), duration_min=60)
+        ski = Session(CROSS_HARD, "skate intervals", "NordicSki", SATURDAY.date(), duration_min=60)
+        self.assertGreater(session_load(ski), session_load(bike))
 
 
 class PlannerTests(unittest.TestCase):
@@ -163,6 +209,103 @@ class PlannerTests(unittest.TestCase):
         plan = self.plan(states, SATURDAY)
         self.assertEqual(plan.session_type, REST)
         self.assertIn("already", plan.why.lower())
+
+    def test_easy_bike_yesterday_does_not_block_quality(self):
+        states = good_recovery()
+        for eid, ent in list(states.items()):
+            if eid.startswith("sensor.oura"):
+                states[eid] = entity(ent["state"], WEDNESDAY, **ent.get("attributes", {}))
+        add_strava(
+            states,
+            0,
+            "Easy commute",
+            "Ride",
+            WEDNESDAY - timedelta(days=1),
+            40,
+            avg_hr=118,
+            max_hr=140,
+        )
+        plan = self.plan(states, WEDNESDAY)
+        self.assertEqual(plan.yesterday, CROSS_EASY)
+        self.assertEqual(plan.session_type, INTERVALS)
+
+    def test_hard_bike_yesterday_blocks_quality(self):
+        states = good_recovery()
+        for eid, ent in list(states.items()):
+            if eid.startswith("sensor.oura"):
+                states[eid] = entity(ent["state"], WEDNESDAY, **ent.get("attributes", {}))
+        add_strava(
+            states,
+            0,
+            "Zwift intervals",
+            "Ride",
+            WEDNESDAY - timedelta(days=1),
+            50,
+            avg_hr=160,
+            max_hr=180,
+        )
+        plan = self.plan(states, WEDNESDAY)
+        self.assertEqual(plan.yesterday, CROSS_HARD)
+        self.assertNotIn(plan.session_type, {INTERVALS, TEMPO, LONG_RUN})
+
+    def test_long_bike_yesterday_needs_recovery(self):
+        states = good_recovery()
+        states[OURA_READINESS] = entity(68, SATURDAY)
+        states[OURA_SLEEP] = entity(66, SATURDAY)
+        states[GARMIN_TRAINING_READINESS] = entity(62)
+        states[GARMIN_BODY_BATTERY] = entity(48)
+        add_strava(
+            states,
+            0,
+            "Sunday ride",
+            "Ride",
+            SATURDAY - timedelta(days=1),
+            130,
+            avg_hr=128,
+            max_hr=155,
+        )
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.yesterday, CROSS_LONG)
+        self.assertEqual(plan.session_type, REST)
+
+    def test_hard_ski_yesterday_blocks_quality(self):
+        states = good_recovery()
+        for eid, ent in list(states.items()):
+            if eid.startswith("sensor.oura"):
+                states[eid] = entity(ent["state"], WEDNESDAY, **ent.get("attributes", {}))
+        add_strava(
+            states,
+            0,
+            "Skate intervals",
+            "NordicSki",
+            WEDNESDAY - timedelta(days=1),
+            50,
+            avg_hr=162,
+            max_hr=180,
+        )
+        plan = self.plan(states, WEDNESDAY)
+        self.assertEqual(plan.yesterday, CROSS_HARD)
+        self.assertNotIn(plan.session_type, {INTERVALS, TEMPO, LONG_RUN})
+        self.assertIn("ski", plan.why.lower())
+
+    def test_easy_ski_yesterday_does_not_block_quality(self):
+        states = good_recovery()
+        for eid, ent in list(states.items()):
+            if eid.startswith("sensor.oura"):
+                states[eid] = entity(ent["state"], WEDNESDAY, **ent.get("attributes", {}))
+        add_strava(
+            states,
+            0,
+            "Easy classic",
+            "NordicSki",
+            WEDNESDAY - timedelta(days=1),
+            45,
+            avg_hr=125,
+            max_hr=150,
+        )
+        plan = self.plan(states, WEDNESDAY)
+        self.assertEqual(plan.yesterday, CROSS_EASY)
+        self.assertEqual(plan.session_type, INTERVALS)
 
 
 if __name__ == "__main__":

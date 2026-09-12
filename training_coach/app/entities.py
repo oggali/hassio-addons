@@ -29,6 +29,34 @@ STRAVA_LATEST_SPLITS = "sensor.strava_latest_splits"
 
 SESSION_SENSOR = "sensor.training_coach_session"
 SUMMARY_SENSOR = "sensor.training_coach_summary"
+GOAL_SENSOR = "sensor.training_coach_goal"
+FEEDBACK_SENSOR = "sensor.training_coach_feedback"
+
+RACE_DATE_HELPER = "input_datetime.training_coach_race_date"
+RACE_DISTANCE_HELPER = "input_select.training_coach_race_distance"
+TARGET_TIME_HELPER = "input_text.training_coach_target_time"
+WEEKLY_LONG_HELPER = "input_number.training_coach_weekly_long_runs"
+WEEKLY_QUALITY_HELPER = "input_number.training_coach_weekly_quality_runs"
+WEEKLY_STRENGTH_HELPER = "input_number.training_coach_weekly_strength"
+WEEKLY_REST_HELPER = "input_number.training_coach_weekly_rest_days"
+FEELING_HELPER = "input_select.training_coach_feeling"
+DID_PLAN_HELPER = "input_select.training_coach_did_plan"
+SKIP_REASON_HELPER = "input_select.training_coach_skip_reason"
+
+PREF_HELPER_IDS = (
+    RACE_DATE_HELPER,
+    RACE_DISTANCE_HELPER,
+    TARGET_TIME_HELPER,
+    WEEKLY_LONG_HELPER,
+    WEEKLY_QUALITY_HELPER,
+    WEEKLY_STRENGTH_HELPER,
+    WEEKLY_REST_HELPER,
+)
+FEEDBACK_HELPER_IDS = (
+    FEELING_HELPER,
+    DID_PLAN_HELPER,
+    SKIP_REASON_HELPER,
+)
 
 STRAVA_RECENT_COUNT = 10
 

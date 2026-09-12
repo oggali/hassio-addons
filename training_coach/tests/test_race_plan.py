@@ -1,0 +1,242 @@
+"""Pace bands, periodization, finish-time MC, feedback matching."""
+
+from __future__ import annotations
+
+import sys
+import unittest
+from datetime import date, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "app"))
+
+from classify import EASY_RUN, INTERVALS, LONG_RUN, REST, TEMPO, Session  # noqa: E402
+from entities import (  # noqa: E402
+    GARMIN_BODY_BATTERY,
+    GARMIN_HRV_BASELINE,
+    GARMIN_HRV_NIGHT,
+    GARMIN_TRAINING_READINESS,
+    OURA_HRV_BALANCE,
+    OURA_READINESS,
+    OURA_REST_MODE,
+    OURA_SLEEP,
+    OURA_SLEEP_HRV,
+    OURA_TEMP,
+)
+from features import build_snapshot  # noqa: E402
+from feedback import classify_compliance, parse_coach_action, recap_text  # noqa: E402
+from goal import Prefs  # noqa: E402
+from load import build_load_snapshot  # noqa: E402
+from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
+from periodize import build_skeleton  # noqa: E402
+from planner import plan_day  # noqa: E402
+from settings import Settings  # noqa: E402
+from simulate import finish_distribution, search_calendar  # noqa: E402
+
+TZ = ZoneInfo("Europe/Helsinki")
+SATURDAY = date(2026, 8, 22)
+
+
+def _session(kind, day, km, minutes, title="run"):
+    return Session(
+        session_type=kind,
+        title=title,
+        sport="Run",
+        when=day,
+        duration_min=minutes,
+        distance_m=km * 1000,
+        source="test",
+    )
+
+
+class PaceTests(unittest.TestCase):
+    def test_riegel_and_format(self):
+        t = riegel(20 * 60, 5, 10, 1.06)
+        self.assertGreater(t, 20 * 60)
+        self.assertEqual(format_pace(5 + 50 / 60), "5:50")
+
+    def test_easy_pace_from_history(self):
+        sessions = [
+            _session(EASY_RUN, SATURDAY - timedelta(days=i), 8, 48) for i in range(6)
+        ]
+        pace = easy_pace_min_km(sessions, SATURDAY)
+        self.assertAlmostEqual(pace, 6.0, places=1)
+
+    def test_target_sets_race_pace(self):
+        sessions = [_session(EASY_RUN, SATURDAY - timedelta(days=1), 8, 48)]
+        prefs = Prefs(race_date=date(2026, 10, 4), race_distance="half", target_time="1:45:00")
+        paces = build_paces(sessions, prefs, SATURDAY)
+        self.assertIsNotNone(paces.race_pace)
+        self.assertIsNotNone(paces.predicted_s)
+        self.assertGreater(paces.predicted_s, 6300)
+        self.assertGreater(paces.easy_min, paces.interval_min)
+
+
+class PeriodizeTests(unittest.TestCase):
+    def test_aligns_to_race_day(self):
+        today = date(2026, 9, 12)
+        prefs = Prefs(race_date=date(2026, 10, 4), race_distance="half", target_time="1:45:00")
+        sessions = [_session(EASY_RUN, today - timedelta(days=1), 8, 48)]
+        load = build_load_snapshot(sessions, today)
+        paces = build_paces(sessions, prefs, today)
+        days = build_skeleton(today, prefs, load, paces, sessions)
+        self.assertEqual(days[-1].day, prefs.race_date)
+        self.assertEqual(days[-1].session_type, LONG_RUN)
+        self.assertEqual(days[-1].structure, "Race day")
+        self.assertTrue(any(d.session_type in {INTERVALS, TEMPO} for d in days))
+
+    def test_insane_target_does_not_explode_volume(self):
+        today = date(2026, 9, 12)
+        prefs = Prefs(race_date=date(2026, 10, 4), race_distance="marathon", target_time="2:10:00")
+        sessions = [_session(EASY_RUN, today - timedelta(days=1), 6, 40)]
+        load = build_load_snapshot(sessions, today)
+        paces = build_paces(sessions, prefs, today)
+        finish = finish_distribution(paces, prefs, seed=1)
+        self.assertFalse(finish["feasible"])
+        skeleton = build_skeleton(today, prefs, load, paces, sessions)
+        adjusted = search_calendar(skeleton, load, prefs, paces, [], finish, seed=3)
+        training_longs = [
+            d.km_max for d in adjusted if d.session_type == LONG_RUN and d.phase != "race"
+        ]
+        self.assertTrue(training_longs)
+        self.assertLess(max(training_longs), 20)
+        self.assertLess(max(d.km_max for d in adjusted if d.session_type == LONG_RUN), 45)
+
+    def test_no_goal_is_maintenance(self):
+        today = date(2026, 9, 12)
+        prefs = Prefs.defaults()
+        sessions = [_session(EASY_RUN, today - timedelta(days=1), 8, 48)]
+        load = build_load_snapshot(sessions, today)
+        paces = build_paces(sessions, prefs, today)
+        days = build_skeleton(today, prefs, load, paces, sessions)
+        self.assertFalse(prefs.has_race)
+        self.assertNotEqual(days[-1].structure, "Race day")
+        self.assertEqual(days[-1].day, today + timedelta(days=13))
+
+    def test_quality_structure_varies_by_distance(self):
+        from periodize import interval_structure
+
+        five = interval_structure(Prefs(race_distance="5k"), [], None, "build")
+        half = interval_structure(Prefs(race_distance="half"), [], None, "build")
+        mara = interval_structure(Prefs(race_distance="marathon"), [], None, "build")
+        self.assertIn("400", five[0])
+        self.assertIn("1000", half[0])
+        self.assertNotEqual(five[0], mara[0])
+
+    def test_interval_ladder_holds_after_skip(self):
+        from periodize import interval_structure
+
+        prefs = Prefs(race_distance="5k")
+        last = _session(INTERVALS, SATURDAY - timedelta(days=3), 8, 50, title="intervals")
+        stepped = interval_structure(prefs, [last], "ok", "build", last_compliance="match")
+        held = interval_structure(prefs, [last], "tired", "build", last_compliance="skipped")
+        self.assertNotEqual(stepped[0], held[0])
+
+
+class FinishMcTests(unittest.TestCase):
+    def test_deterministic_seed(self):
+        prefs = Prefs(race_date=date(2026, 10, 4), race_distance="half", target_time="1:45:00")
+        paces = build_paces([], prefs, SATURDAY)
+        a = finish_distribution(paces, prefs, seed=42)
+        b = finish_distribution(paces, prefs, seed=42)
+        self.assertEqual(a["p10"], b["p10"])
+        self.assertEqual(a["p90"], b["p90"])
+        self.assertLess(a["p10"], a["p50"])
+        self.assertLess(a["p50"], a["p90"])
+
+
+class FeedbackTests(unittest.TestCase):
+    def test_compliance(self):
+        self.assertEqual(classify_compliance(REST, None), "match")
+        self.assertEqual(classify_compliance(INTERVALS, None), "skipped")
+        self.assertEqual(classify_compliance(INTERVALS, TEMPO), "same_family")
+        self.assertEqual(classify_compliance(INTERVALS, EASY_RUN), "substituted")
+        self.assertEqual(classify_compliance(REST, EASY_RUN), "extra")
+
+    def test_parse_android_action(self):
+        parsed = parse_coach_action("coach_2026-09-12_feel_great")
+        self.assertEqual(parsed["option"], "great")
+        self.assertEqual(parsed["field"], "feeling")
+        skipped = parse_coach_action("coach_2026-09-12_comp_skipped")
+        self.assertEqual(skipped["option"], "skipped")
+        other = parse_coach_action("coach_2026-09-12_skip_other", "weather was bad")
+        self.assertEqual(other["option"], "other_sport")
+        self.assertEqual(other["notes"], "weather was bad")
+
+    def test_telegram_helper_prompt_when_no_android(self):
+        text = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=True)
+        self.assertIn("input_select.training_coach_feeling", text)
+        silent = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=False)
+        self.assertNotIn("input_select.training_coach_feeling", silent)
+
+
+class OverlayTests(unittest.TestCase):
+    def test_poor_recovery_overrides_calendar_quality(self):
+        settings = Settings(timezone="Europe/Helsinki")
+        stamp = "2026-08-22T07:30:00+03:00"
+
+        def entity(state):
+            return {"state": str(state), "attributes": {}, "last_updated": stamp, "last_changed": stamp}
+
+        states = {
+            OURA_READINESS: entity(48),
+            OURA_SLEEP: entity(52),
+            OURA_SLEEP_HRV: entity(30),
+            OURA_HRV_BALANCE: entity(50),
+            OURA_TEMP: entity(0.5),
+            OURA_REST_MODE: entity("off"),
+            GARMIN_TRAINING_READINESS: entity(40),
+            GARMIN_BODY_BATTERY: entity(22),
+            GARMIN_HRV_NIGHT: entity(30),
+            GARMIN_HRV_BASELINE: entity(40),
+        }
+        from datetime import datetime as dt
+
+        from periodize import PlanDay
+
+        snap = build_snapshot(states, settings, now=dt(2026, 8, 22, 7, 30, tzinfo=TZ))
+        intended = PlanDay(
+            day=SATURDAY,
+            session_type=INTERVALS,
+            km_min=8,
+            km_max=11,
+            pace_min=4.3,
+            pace_max=4.6,
+            structure="8×400 m",
+            phase="build",
+        )
+        prefs = Prefs(race_date=date(2026, 10, 4), race_distance="half", target_time="1:45:00")
+        plan = plan_day(snap, settings, prefs=prefs, calendar_today=intended)
+        self.assertEqual(plan.session_type, REST)
+        self.assertEqual(plan.recovery_band, "poor")
+
+    def test_recipe_km_pace_formatting(self):
+        from recipes import build_recipe
+
+        recipe = build_recipe(
+            EASY_RUN,
+            [],
+            None,
+            km_min=6,
+            km_max=10,
+            pace_min=5 + 50 / 60,
+            pace_max=6.5,
+            structure="Easy conversational / zone 2",
+        )
+        self.assertIn("6–10 km", recipe.title)
+        self.assertIn("5:50", recipe.title)
+        self.assertIn("6:30", recipe.title)
+
+    def test_no_race_recipe_uses_history_ranges(self):
+        from recipes import build_recipe
+
+        sessions = [_session(EASY_RUN, SATURDAY - timedelta(days=1), 8, 48)]
+        paces = build_paces(sessions, Prefs.defaults(), SATURDAY)
+        recipe = build_recipe(EASY_RUN, sessions, None, paces=paces)
+        self.assertIn("km", recipe.title)
+        self.assertIn("/km", recipe.title)
+
+
+if __name__ == "__main__":
+    unittest.main()

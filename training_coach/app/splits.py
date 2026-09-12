@@ -240,12 +240,14 @@ def _match_split(session: Session, split_sets: dict[str, SplitSet]) -> SplitSet 
 
 
 def _reclassify(session: Session, hint: str | None, long_run_min_minutes: int) -> str:
-    from classify import OTHER, RUN_SPORTS, STRENGTH, classify_run
+    from classify import CROSS_TYPES, OTHER, RUN_SPORTS, STRENGTH, classify_run
 
     if session.session_type == STRENGTH:
         return STRENGTH
     sport_n = (session.sport or "").lower().replace(" ", "")
-    if session.session_type == OTHER and sport_n not in RUN_SPORTS:
+    if session.session_type in CROSS_TYPES or (
+        session.session_type == OTHER and sport_n not in RUN_SPORTS
+    ):
         return session.session_type
     return classify_run(
         session.title,

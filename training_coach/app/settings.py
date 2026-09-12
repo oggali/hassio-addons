@@ -1,4 +1,4 @@
-"""Add-on runtime settings."""
+"""Add-on runtime settings (ops only; training intent lives in helpers / DuckDB)."""
 
 from __future__ import annotations
 
@@ -25,15 +25,13 @@ def _env_int(name: str, default: int) -> int:
 class Settings:
     timezone: str = "Europe/Helsinki"
     run_time: str = "07:30"
+    evening_time: str = "20:30"
     oura_wait_minutes: int = 90
     poll_seconds: int = 60
     notify_service: str = "notify.tg_oskari"
+    mobile_notify_service: str = ""
     run_immediately: bool = True
     strava_entity_prefix: str = "sensor.strava_oskari_vuorinen"
-    weekly_long_runs: int = 1
-    weekly_quality_runs: int = 1
-    weekly_strength: int = 2
-    weekly_rest_days: int = 1
     long_run_min_minutes: int = 75
     db_path: str = "/data/coach.duckdb"
     history_seed_days: int = 365
@@ -43,30 +41,43 @@ class Settings:
         return ZoneInfo(self.timezone)
 
     @property
+    def mobile_enabled(self) -> bool:
+        value = (self.mobile_notify_service or "").strip().lower()
+        return bool(value) and value not in {"null", "none", "unknown", "false"}
+
+    @property
     def notify_domain_service(self) -> tuple[str, str]:
-        name = self.notify_service.strip()
-        if "." in name:
-            domain, service = name.split(".", 1)
-            return domain, service
-        return "notify", name
+        return _split_service(self.notify_service, "notify")
+
+    @property
+    def mobile_domain_service(self) -> tuple[str, str] | None:
+        if not self.mobile_enabled:
+            return None
+        return _split_service(self.mobile_notify_service, "notify")
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
             timezone=os.environ.get("TZ") or os.environ.get("timezone") or "Europe/Helsinki",
             run_time=os.environ.get("RUN_TIME", "07:30"),
+            evening_time=os.environ.get("EVENING_TIME", "20:30"),
             oura_wait_minutes=_env_int("OURA_WAIT_MINUTES", 90),
             poll_seconds=_env_int("POLL_SECONDS", 60),
             notify_service=os.environ.get("NOTIFY_SERVICE", "notify.tg_oskari"),
+            mobile_notify_service=os.environ.get("MOBILE_NOTIFY_SERVICE", "") or "",
             run_immediately=_env_bool("RUN_IMMEDIATELY", True),
             strava_entity_prefix=os.environ.get(
                 "STRAVA_ENTITY_PREFIX", "sensor.strava_oskari_vuorinen"
             ),
-            weekly_long_runs=_env_int("WEEKLY_LONG_RUNS", 1),
-            weekly_quality_runs=_env_int("WEEKLY_QUALITY_RUNS", 1),
-            weekly_strength=_env_int("WEEKLY_STRENGTH", 2),
-            weekly_rest_days=_env_int("WEEKLY_REST_DAYS", 1),
             long_run_min_minutes=_env_int("LONG_RUN_MIN_MINUTES", 75),
             db_path=os.environ.get("DB_PATH", "/data/coach.duckdb"),
             history_seed_days=_env_int("HISTORY_SEED_DAYS", 365),
         )
+
+
+def _split_service(name: str, default_domain: str) -> tuple[str, str]:
+    text = name.strip()
+    if "." in text:
+        domain, service = text.split(".", 1)
+        return domain, service
+    return default_domain, text
