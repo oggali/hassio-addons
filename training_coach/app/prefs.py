@@ -28,6 +28,7 @@ from goal import (
     parse_race_date,
 )
 from ha_client import HomeAssistantClient
+from ha_ws import HaWebsocket
 from parse import is_unavailable, parse_float, state_value
 from store import CoachStore
 
@@ -74,145 +75,163 @@ def read_feedback_helpers(states: dict[str, dict[str, Any]]) -> dict[str, str]:
     }
 
 
+# Home Assistant no longer exposes input_*/create REST services. Helpers are
+# created with the same websocket collection API as Settings → Helpers.
+HELPER_CREATE_SPECS: list[tuple[str, str, dict[str, Any]]] = [
+    (
+        "input_datetime",
+        RACE_DATE_HELPER,
+        {
+            "name": "Training coach race date",
+            "has_date": True,
+            "has_time": False,
+            "icon": "mdi:calendar",
+        },
+    ),
+    (
+        "input_select",
+        RACE_DISTANCE_HELPER,
+        {
+            "name": "Training coach race distance",
+            "options": list(RACE_DISTANCES),
+            "initial": "none",
+            "icon": "mdi:map-marker-distance",
+        },
+    ),
+    (
+        "input_text",
+        TARGET_TIME_HELPER,
+        {
+            "name": "Training coach target time",
+            "initial": "",
+            "min": 0,
+            "max": 16,
+            "icon": "mdi:timer-outline",
+        },
+    ),
+    (
+        "input_number",
+        WEEKLY_LONG_HELPER,
+        {
+            "name": "Training coach weekly long runs",
+            "min": 0,
+            "max": 3,
+            "step": 1,
+            "initial": 1,
+            "mode": "box",
+            "icon": "mdi:run",
+        },
+    ),
+    (
+        "input_number",
+        WEEKLY_QUALITY_HELPER,
+        {
+            "name": "Training coach weekly quality runs",
+            "min": 0,
+            "max": 4,
+            "step": 1,
+            "initial": 1,
+            "mode": "box",
+            "icon": "mdi:lightning-bolt",
+        },
+    ),
+    (
+        "input_number",
+        WEEKLY_STRENGTH_HELPER,
+        {
+            "name": "Training coach weekly strength",
+            "min": 0,
+            "max": 5,
+            "step": 1,
+            "initial": 2,
+            "mode": "box",
+            "icon": "mdi:dumbbell",
+        },
+    ),
+    (
+        "input_number",
+        WEEKLY_REST_HELPER,
+        {
+            "name": "Training coach weekly rest days",
+            "min": 0,
+            "max": 4,
+            "step": 1,
+            "initial": 1,
+            "mode": "box",
+            "icon": "mdi:bed",
+        },
+    ),
+    (
+        "input_select",
+        FEELING_HELPER,
+        {
+            "name": "Training coach feeling",
+            "options": list(FEELING_OPTIONS),
+            "initial": "unset",
+            "icon": "mdi:emoticon-outline",
+        },
+    ),
+    (
+        "input_select",
+        DID_PLAN_HELPER,
+        {
+            "name": "Training coach did plan",
+            "options": list(DID_PLAN_OPTIONS),
+            "initial": "unset",
+            "icon": "mdi:check-circle-outline",
+        },
+    ),
+    (
+        "input_select",
+        SKIP_REASON_HELPER,
+        {
+            "name": "Training coach skip reason",
+            "options": list(SKIP_REASON_OPTIONS),
+            "initial": "unset",
+            "icon": "mdi:help-circle-outline",
+        },
+    ),
+]
+
+
 class PrefsManager:
     def __init__(self, client: HomeAssistantClient, store: CoachStore) -> None:
         self.client = client
         self.store = store
 
     def ensure_helpers(self) -> None:
-        specs = [
-            (
-                "input_datetime",
-                "create",
-                RACE_DATE_HELPER,
-                {
-                    "name": "Training coach race date",
-                    "has_date": True,
-                    "has_time": False,
-                    "icon": "mdi:calendar",
-                },
-            ),
-            (
-                "input_select",
-                "create",
-                RACE_DISTANCE_HELPER,
-                {
-                    "name": "Training coach race distance",
-                    "options": list(RACE_DISTANCES),
-                    "initial": "none",
-                    "icon": "mdi:map-marker-distance",
-                },
-            ),
-            (
-                "input_text",
-                "create",
-                TARGET_TIME_HELPER,
-                {
-                    "name": "Training coach target time",
-                    "initial": "",
-                    "min": 0,
-                    "max": 16,
-                    "icon": "mdi:timer-outline",
-                },
-            ),
-            (
-                "input_number",
-                "create",
-                WEEKLY_LONG_HELPER,
-                {
-                    "name": "Training coach weekly long runs",
-                    "min": 0,
-                    "max": 3,
-                    "step": 1,
-                    "initial": 1,
-                    "mode": "box",
-                    "icon": "mdi:run",
-                },
-            ),
-            (
-                "input_number",
-                "create",
-                WEEKLY_QUALITY_HELPER,
-                {
-                    "name": "Training coach weekly quality runs",
-                    "min": 0,
-                    "max": 4,
-                    "step": 1,
-                    "initial": 1,
-                    "mode": "box",
-                    "icon": "mdi:lightning-bolt",
-                },
-            ),
-            (
-                "input_number",
-                "create",
-                WEEKLY_STRENGTH_HELPER,
-                {
-                    "name": "Training coach weekly strength",
-                    "min": 0,
-                    "max": 5,
-                    "step": 1,
-                    "initial": 2,
-                    "mode": "box",
-                    "icon": "mdi:dumbbell",
-                },
-            ),
-            (
-                "input_number",
-                "create",
-                WEEKLY_REST_HELPER,
-                {
-                    "name": "Training coach weekly rest days",
-                    "min": 0,
-                    "max": 4,
-                    "step": 1,
-                    "initial": 1,
-                    "mode": "box",
-                    "icon": "mdi:bed",
-                },
-            ),
-            (
-                "input_select",
-                "create",
-                FEELING_HELPER,
-                {
-                    "name": "Training coach feeling",
-                    "options": list(FEELING_OPTIONS),
-                    "initial": "unset",
-                    "icon": "mdi:emoticon-outline",
-                },
-            ),
-            (
-                "input_select",
-                "create",
-                DID_PLAN_HELPER,
-                {
-                    "name": "Training coach did plan",
-                    "options": list(DID_PLAN_OPTIONS),
-                    "initial": "unset",
-                    "icon": "mdi:check-circle-outline",
-                },
-            ),
-            (
-                "input_select",
-                "create",
-                SKIP_REASON_HELPER,
-                {
-                    "name": "Training coach skip reason",
-                    "options": list(SKIP_REASON_OPTIONS),
-                    "initial": "unset",
-                    "icon": "mdi:help-circle-outline",
-                },
-            ),
+        missing = [
+            (domain, entity_id, data)
+            for domain, entity_id, data in HELPER_CREATE_SPECS
+            if self.client.get_state(entity_id) is None
         ]
-        for domain, service, entity_id, data in specs:
-            if self.client.get_state(entity_id) is not None:
-                continue
-            try:
-                self.client.call_service(domain, service, data)
-                _log(f"Created helper {entity_id}")
-            except Exception as exc:  # noqa: BLE001
-                _log(f"Could not create helper {entity_id}: {exc}")
+        if not missing:
+            return
+        session = None
+        try:
+            session = HaWebsocket(self.client.base_url, self.client.token)
+            session.connect()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"Helper websocket unavailable ({exc}); trying REST create")
+            session = None
+        try:
+            for domain, entity_id, data in missing:
+                try:
+                    if session is not None:
+                        result = session.command(f"{domain}/create", data)
+                    else:
+                        result = self.client.call_service(domain, "create", data)
+                    created_id = result.get("id") if isinstance(result, dict) else None
+                    created_eid = f"{domain}.{created_id}" if created_id else entity_id
+                    if created_eid != entity_id:
+                        _log(f"Created helper {created_eid} (expected {entity_id})")
+                    else:
+                        _log(f"Created helper {entity_id}")
+                except Exception as exc:  # noqa: BLE001
+                    _log(f"Could not create helper {entity_id}: {exc}")
+        finally:
+            if session is not None:
+                session.close()
 
     def load_helper_states(self) -> dict[str, dict[str, Any]]:
         ids = [

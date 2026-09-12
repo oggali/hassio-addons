@@ -7,10 +7,12 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
+from entities import FEEDBACK_HELPER_IDS, PREF_HELPER_IDS  # noqa: E402
 from goal import (  # noqa: E402
     Prefs,
     format_hms,
@@ -18,7 +20,7 @@ from goal import (  # noqa: E402
     parse_target_seconds,
     phase_for,
 )
-from prefs import prefs_from_states  # noqa: E402
+from prefs import HELPER_CREATE_SPECS, PrefsManager, prefs_from_states  # noqa: E402
 from store import CoachStore  # noqa: E402
 
 
@@ -82,6 +84,91 @@ class PrefsStoreTests(unittest.TestCase):
         self.assertEqual(prefs.race_date, date(2026, 10, 4))
         self.assertEqual(prefs.weekly_quality_runs, 2)
         self.assertEqual(prefs.target_seconds, 6300)
+
+
+class FakeClient:
+    def __init__(self, existing: dict | None = None) -> None:
+        self.states = dict(existing or {})
+        self.base_url = "http://supervisor/core/api"
+        self.token = "token"
+        self.services: list[tuple[str, str, dict | None]] = []
+
+    def get_state(self, entity_id: str):
+        return self.states.get(entity_id)
+
+    def call_service(self, domain: str, service: str, data=None):
+        self.services.append((domain, service, data))
+        return None
+
+
+class FakeWs:
+    instances: list["FakeWs"] = []
+
+    def __init__(self, api_url: str, token: str, timeout: int = 20) -> None:
+        self.api_url = api_url
+        self.token = token
+        self.timeout = timeout
+        self.commands: list[tuple[str, dict | None]] = []
+        self.closed = False
+        FakeWs.instances.append(self)
+
+    def connect(self) -> None:
+        return None
+
+    def command(self, command_type: str, data=None):
+        self.commands.append((command_type, data))
+        name = (data or {}).get("name", "x")
+        return {"id": str(name).lower().replace(" ", "_")}
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class BoomWs:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def connect(self) -> None:
+        raise RuntimeError("no websocket")
+
+    def close(self) -> None:
+        return None
+
+
+class EnsureHelpersTests(unittest.TestCase):
+    def setUp(self) -> None:
+        FakeWs.instances = []
+
+    def test_specs_cover_all_helper_ids(self):
+        ids = {entity_id for _, entity_id, _ in HELPER_CREATE_SPECS}
+        self.assertEqual(ids, set(PREF_HELPER_IDS + FEEDBACK_HELPER_IDS))
+
+    def test_creates_missing_helpers_over_websocket(self):
+        client = FakeClient()
+        with patch("prefs.HaWebsocket", FakeWs):
+            PrefsManager(client, None).ensure_helpers()  # type: ignore[arg-type]
+        self.assertEqual(len(FakeWs.instances), 1)
+        session = FakeWs.instances[0]
+        self.assertTrue(session.closed)
+        self.assertEqual(len(session.commands), len(HELPER_CREATE_SPECS))
+        self.assertEqual(session.commands[0][0], "input_datetime/create")
+        self.assertEqual(session.commands[1][0], "input_select/create")
+        self.assertEqual(client.services, [])
+
+    def test_skips_helpers_that_already_exist(self):
+        existing = {entity_id: {"state": "on"} for _, entity_id, _ in HELPER_CREATE_SPECS}
+        client = FakeClient(existing)
+        with patch("prefs.HaWebsocket", FakeWs):
+            PrefsManager(client, None).ensure_helpers()  # type: ignore[arg-type]
+        self.assertEqual(FakeWs.instances, [])
+        self.assertEqual(client.services, [])
+
+    def test_rest_fallback_when_websocket_unavailable(self):
+        client = FakeClient()
+        with patch("prefs.HaWebsocket", BoomWs):
+            PrefsManager(client, None).ensure_helpers()  # type: ignore[arg-type]
+        self.assertEqual(len(client.services), len(HELPER_CREATE_SPECS))
+        self.assertEqual(client.services[0][:2], ("input_datetime", "create"))
 
 
 if __name__ == "__main__":

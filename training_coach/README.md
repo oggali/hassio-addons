@@ -47,7 +47,7 @@ Skipped-vs-done is stored even if you never tap. A late run after evening is cor
 
 ## Live prefs (helpers)
 
-Created on startup if missing (defaults match the old weekly quotas):
+Created on startup if missing (same helper API as **Settings → Devices & services → Helpers**; defaults match the old weekly quotas):
 
 - `input_datetime.training_coach_race_date`
 - `input_select.training_coach_race_distance` — `none` / `5k` / `10k` / `half` / `marathon`

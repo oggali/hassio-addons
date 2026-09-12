@@ -37,7 +37,7 @@ class HomeAssistantClient:
         )
         if resp.status_code == 404:
             return None
-        resp.raise_for_status()
+        self._raise_for_status(resp)
         return resp.json()
 
     def get_states(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -66,7 +66,7 @@ class HomeAssistantClient:
             json=payload,
             timeout=self.timeout,
         )
-        resp.raise_for_status()
+        self._raise_for_status(resp)
         return resp.json()
 
     def call_service(self, domain: str, service: str, data: dict[str, Any] | None = None) -> Any:
@@ -76,7 +76,7 @@ class HomeAssistantClient:
             json=data or {},
             timeout=self.timeout,
         )
-        resp.raise_for_status()
+        self._raise_for_status(resp)
         if not resp.content:
             return None
         return resp.json()
@@ -107,5 +107,24 @@ class HomeAssistantClient:
             params=params,
             timeout=self.timeout,
         )
-        resp.raise_for_status()
+        self._raise_for_status(resp)
         return resp.json()
+
+    @staticmethod
+    def _raise_for_status(resp: requests.Response) -> None:
+        if resp.ok:
+            return
+        detail = (resp.text or "").strip()
+        try:
+            payload = resp.json()
+            if isinstance(payload, dict) and payload.get("message"):
+                detail = str(payload["message"])
+        except Exception:
+            pass
+        if len(detail) > 400:
+            detail = detail[:400] + "…"
+        suffix = f" — {detail}" if detail else ""
+        raise requests.HTTPError(
+            f"{resp.status_code} {resp.reason} for url: {resp.url}{suffix}",
+            response=resp,
+        )
