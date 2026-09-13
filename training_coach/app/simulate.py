@@ -14,9 +14,9 @@ from __future__ import annotations
 import random
 from classify import HARD_OR_LONG, LONG_RUN, QUALITY
 from goal import Prefs
-from load import LoadSnapshot
+from load import LoadSnapshot, long_run_floor_km
 from paces import PaceSet, riegel
-from periodize import PlanDay
+from periodize import LONG_WEEKLY_GROWTH, PlanDay
 
 MC_FINISH = 500  # draws for P10/P50/P90; 200 is noisier, 2000 is slower for no gain
 MC_PLAN_CANDIDATES = 10  # calendar mutations to try
@@ -189,8 +189,14 @@ def _sore_recent(feedback: list[dict]) -> bool:
     return len(relevant) >= 1
 
 
-def _safe_volume(days: list[PlanDay], load: LoadSnapshot) -> list[PlanDay]:
-    cap = max(load.long_km, 8.0) * 1.12  # same +12%/week idea as periodize.LONG_WEEKLY_GROWTH
+def _safe_volume(
+    days: list[PlanDay],
+    load: LoadSnapshot,
+    paces: PaceSet | None = None,
+) -> list[PlanDay]:
+    pace = (paces.easy_min + paces.easy_max) / 2.0 if paces else None
+    floor = long_run_floor_km(load.easy_km, pace)
+    cap = max(floor, max(load.long_km, 8.0) * LONG_WEEKLY_GROWTH)
     out: list[PlanDay] = []
     for day in days:
         if day.phase == "race":
@@ -288,7 +294,7 @@ def search_calendar(
     no_time_days = _no_time_weekdays(feedback)
     extra_spacing = _sore_recent(feedback)
     if not finish.get("feasible", True):
-        return _safe_volume(days, load)
+        return _safe_volume(days, load, paces)
     best = days
     best_score = _score_plan(
         days,

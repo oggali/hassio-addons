@@ -28,7 +28,7 @@ Morning lines look like `Easy run  6–10 km  @  5:50–6:30 /km` or `Intervals 
 2. **Sessions** from a local DuckDB warehouse of classified Strava activities + splits. HA recorder history seeds the DB once (365-day lookback).
 3. **Live prefs** (Home Assistant helpers, not add-on config): race date / distance / target time and weekly long / quality / strength / rest caps. Changing a helper does **not** restart the add-on; the coach polls and rebuilds the remaining calendar.
 4. **No race set:** same daily quota picker as before (1 long, 1 quality, 2 strength, 1 rest by default).
-5. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. A small Monte Carlo search nudges remaining days; a second Monte Carlo publishes P10 / P50 / P90 finish time.
+5. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. Long-run km is at least **2.2× weekday easy** or **~90 min** at easy pace (not the median of sessions that barely cleared the 75-min “long” tag). A small Monte Carlo search nudges remaining days; a second Monte Carlo publishes P10 / P50 / P90 finish time.
 6. **Gates:** rest mode or poor recovery still wins over the calendar. Okay recovery uses the **low** end of the km range and downgrades quality/long.
 
 Book training plans are **not** copied. The calendar uses public periodization rules and your data.
@@ -117,7 +117,7 @@ Use your real add-on slug if it differs. After wipe, the next plan run re-seeds 
 | `poll_seconds` | `60` | Oura wait + helper poll interval |
 | `notify_service` | `notify.tg_oskari` | Telegram (always used, morning and evening) |
 | `mobile_notify_service` | *(empty)* | Optional, e.g. `notify.mobile_app_galaxys26` |
-| `run_immediately_on_start` | `true` | Plan once on startup (does not wait for Oura) |
+| `run_immediately_on_start` | `true` | Plan once on startup (no Oura wait). Notifies only if today’s morning slot already passed. |
 | `strava_entity_prefix` | `sensor.strava_oskari_vuorinen` | Prefix for recent-activity sensors |
 | `long_run_min_minutes` | `75` | Duration used to classify unlabeled long runs |
 

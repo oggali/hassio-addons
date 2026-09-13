@@ -114,6 +114,37 @@ class PeriodizeTests(unittest.TestCase):
         self.assertNotEqual(days[-1].structure, "Race day")
         self.assertEqual(days[-1].day, today + timedelta(days=13))
 
+    def test_long_is_meaningfully_longer_than_easy(self):
+        """7 km easy + a 13.5 km tagged long used to prescribe 12.4–14.5 km longs."""
+        today = date(2026, 9, 13)
+        prefs = Prefs.defaults()
+        sessions = [
+            _session(EASY_RUN, today - timedelta(days=i), 7.0, 42) for i in range(1, 10)
+        ]
+        sessions.append(_session(LONG_RUN, today - timedelta(days=6), 13.5, 81))
+        load = build_load_snapshot(sessions, today)
+        paces = build_paces(sessions, prefs, today)
+        days = build_skeleton(today, prefs, load, paces, sessions)
+        easy = next(d for d in days if d.session_type == EASY_RUN)
+        long = next(d for d in days if d.session_type == LONG_RUN)
+        easy_mid = (easy.km_min + easy.km_max) / 2.0
+        long_mid = (long.km_min + long.km_max) / 2.0
+        self.assertAlmostEqual(easy_mid, 7.0, delta=0.6)
+        self.assertGreaterEqual(long_mid / easy_mid, 2.0)
+        self.assertGreater(long.km_min, easy.km_max + 4.0)
+        self.assertGreaterEqual(long_mid, 15.0)
+
+    def test_weekly_longest_counts_even_if_not_tagged_long(self):
+        today = date(2026, 9, 13)
+        sessions = [
+            _session(EASY_RUN, today - timedelta(days=i), 7.0, 42) for i in range(2, 8)
+        ]
+        sessions.append(
+            _session(EASY_RUN, today - timedelta(days=1), 16.0, 70, title="Sunday run")
+        )
+        load = build_load_snapshot(sessions, today)
+        self.assertGreaterEqual(load.long_km, 15.5)
+
     def test_quality_structure_varies_by_distance(self):
         from periodize import interval_structure
 

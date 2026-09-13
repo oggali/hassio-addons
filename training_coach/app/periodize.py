@@ -31,7 +31,7 @@ from goal import (
     end_of_plan,
     phase_for,
 )
-from load import LoadSnapshot
+from load import LoadSnapshot, long_run_floor_km
 from paces import PaceSet
 
 # Interval progressions as (reps, meters). Index 0 is the first session; a
@@ -55,14 +55,14 @@ TEMPO_LADDERS: dict[str, list[int]] = {
 }
 
 # Soft cap for the longest *training* long run (km). Race day uses race distance.
-# Lower these if peak longs feel too big vs current fitness; the weekly +12% cap
-# in _long_center still prevents a sudden jump from today's long_km.
+# These are peaks, not typical weeks; _long_center also floors vs 2.2× easy / 90 min
+# so a 7 km easy day cannot pair with a 13 km "long".
 PEAK_LONG_KM = {
-    RACE_5K: 10.0,
-    RACE_10K: 14.0,
-    RACE_HALF: 18.0,
+    RACE_5K: 14.0,
+    RACE_10K: 16.0,
+    RACE_HALF: 20.0,
     RACE_MARATHON: 32.0,
-    "none": 14.0,
+    "none": 18.0,
 }
 
 # Long-run growth per remaining week (1.12 = +12%). Raise toward 1.15–1.20 for
@@ -269,16 +269,36 @@ def _km_range(center: float, spread: float = KM_SPREAD_EASY) -> tuple[float, flo
     return lo, hi
 
 
-def _long_center(week_index: int, n_weeks: int, load: LoadSnapshot, prefs: Prefs, phase: str) -> float:
-    """Target long-run km for this week, never a sudden jump from current fitness.
+def _easy_pace(paces: PaceSet | None) -> float | None:
+    if paces is None:
+        return None
+    return (paces.easy_min + paces.easy_max) / 2.0
 
-    peak is min(PEAK_LONG_KM, ~85–90% of race distance). Each week may grow at
-    most LONG_WEEKLY_GROWTH from today's typical long. Taper cuts volume.
+
+def _long_center(
+    week_index: int,
+    n_weeks: int,
+    load: LoadSnapshot,
+    prefs: Prefs,
+    phase: str,
+    paces: PaceSet | None = None,
+) -> float:
+    """Target long-run km for this week.
+
+    Start from max(history, 2.2× weekday easy, 90 min at easy pace) so the long
+    is actually long vs easy days. Peak is PEAK_LONG_KM (and ~85–90% of race
+    distance for half/marathon). Each later week may grow at most
+    LONG_WEEKLY_GROWTH. Taper cuts volume.
     """
-    current = max(8.0, load.long_km)
-    peak = PEAK_LONG_KM.get(prefs.race_distance, 14.0)
+    floor = long_run_floor_km(load.easy_km, _easy_pace(paces))
+    historical = load.long_km if load.long_km and load.long_km > 0 else 0.0
+    current = max(historical, floor)
+    peak = PEAK_LONG_KM.get(prefs.race_distance, PEAK_LONG_KM["none"])
     if prefs.race_km:
-        peak = min(peak, max(current, prefs.race_km * (0.85 if prefs.race_distance == RACE_MARATHON else 0.9)))
+        race_long = prefs.race_km * (0.85 if prefs.race_distance == RACE_MARATHON else 0.9)
+        # 5k/10k race distance is shorter than a training long; don't shrink to it.
+        peak = min(peak, max(current, race_long))
+    peak = max(peak, current)
     if phase == "taper":
         return max(6.0, min(current, peak) * TAPER_LONG_FRACTION)
     if phase == "race" and prefs.race_km:
@@ -382,7 +402,7 @@ def build_skeleton(
             km_min, km_max = _km_range(center, KM_SPREAD_QUALITY)
         elif raw == LONG_RUN:
             session_type = LONG_RUN
-            center = _long_center(week_index, n_weeks, load, prefs, phase)
+            center = _long_center(week_index, n_weeks, load, prefs, phase, paces)
             km_min, km_max = _km_range(center, KM_SPREAD_LONG)
             pace_min, pace_max = paces.easy_min, paces.easy_max
             structure = "Easy long run"

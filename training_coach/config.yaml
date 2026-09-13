@@ -1,5 +1,5 @@
 name: Training Coach
-version: "2026.09.12.1"
+version: "2026.09.13"
 slug: training_coach
 description: "Morning and evening training coach from Oura, Garmin, and Strava, with live race prefs and Telegram."
 arch:

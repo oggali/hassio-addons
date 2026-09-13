@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from classify import EASY_RUN, INTERVALS, LONG_RUN, REST, STRENGTH, TEMPO, CROSS_HARD, CROSS_LONG, Session
+from load import LONG_EASY_RATIO, MIN_LONG_MINUTES
 from paces import PaceSet, format_pace_range
 from periodize import PlanDay
 
@@ -37,11 +38,12 @@ def typical_durations(sessions: list[Session]) -> tuple[int, int]:
     longs = [s.duration_min for s in sessions if s.session_type == LONG_RUN and s.duration_min]
     easy_min = int(round(_median(easy, 40)))
     easy_min = max(30, min(easy_min, 55))
+    duration_floor = max(int(round(easy_min * LONG_EASY_RATIO)), MIN_LONG_MINUTES)
     if longs:
         last_long = max(longs)
-        long_min = int(round(min(max(last_long * 1.1, easy_min + 20), last_long * 1.3, 120)))
+        long_min = int(round(min(max(last_long * 1.1, duration_floor), 150)))
     else:
-        long_min = min(max(easy_min + 25, 80), 110)
+        long_min = min(max(duration_floor, MIN_LONG_MINUTES), 120)
     return easy_min, long_min
 
 

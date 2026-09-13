@@ -65,7 +65,15 @@ FALLBACK_PACE_MIN_KM = 6.0
 
 # Typical run distances used when history has no easy/long runs yet (km).
 TYPICAL_EASY_KM = 7.0
-TYPICAL_LONG_KM = 12.0
+TYPICAL_LONG_KM = 14.0
+# A long run must be a long run, not a slightly longer easy day.
+# Classifier "long" is duration ≥ 75 min, so the median tagged long sits
+# just over that bar (~12–14 km at 6:00/km). Floor against weekday easy
+# and ~90 min at easy pace instead.
+LONG_EASY_RATIO = 2.2
+MIN_LONG_MINUTES = 90
+# Weekly-longest runs below this are "easy-only weeks", not longs.
+WEEKLY_LONG_MIN_KM = 9.0
 
 
 @dataclass(frozen=True)
@@ -75,7 +83,7 @@ class LoadSnapshot:
     tsb: float  # form (ctl - atl); plan-search penalizes TSB < -25
     weekly_km: float  # running km only, last 7 days
     easy_km: float  # median easy-run distance; sizes weekday easy slots
-    long_km: float  # median long-run distance; caps the long-run ramp
+    long_km: float  # typical long (weekly longest / classified); floored vs easy in periodize
     weekly_load: float  # sum of session_load over last 7 days
 
 
@@ -138,6 +146,31 @@ def typical_run_km(sessions: list[Session], session_type: str, default: float) -
     return _median(dists, default)
 
 
+def typical_weekly_longest_km(sessions: list[Session], default: float) -> float:
+    """Median of each week's longest run. Catches weekend runs just under the long tag."""
+    by_week: dict[tuple[int, int], float] = {}
+    for session in sessions:
+        if not session.when or session.session_type not in RUN_TYPES:
+            continue
+        if not session.distance_m or session.distance_m <= 500:
+            continue
+        iso = session.when.isocalendar()
+        key = (int(iso[0]), int(iso[1]))
+        km = session.distance_m / 1000.0
+        by_week[key] = max(by_week.get(key, 0.0), km)
+    values = [km for km in by_week.values() if km >= WEEKLY_LONG_MIN_KM]
+    if not values:
+        return default
+    return _median(values, default)
+
+
+def long_run_floor_km(easy_km: float, easy_pace: float | None = None) -> float:
+    """Minimum long-run centre: 2.2× weekday easy, or 90 min at easy pace."""
+    easy = max(5.0, min(easy_km or TYPICAL_EASY_KM, 12.0))
+    pace = easy_pace if easy_pace and easy_pace > 4.0 else FALLBACK_PACE_MIN_KM
+    return max(easy * LONG_EASY_RATIO, MIN_LONG_MINUTES / pace)
+
+
 def weekly_km(sessions: list[Session], today: date, days: int = 7) -> float:
     """Running kilometres only — bike/ski distance must not inflate race volume."""
     start = today - timedelta(days=days - 1)
@@ -159,12 +192,17 @@ def weekly_load(sessions: list[Session], today: date, days: int = 7) -> float:
 
 def build_load_snapshot(sessions: list[Session], today: date) -> LoadSnapshot:
     ctl, atl, tsb = ctl_atl_tsb(sessions, today)
+    classified_long = typical_run_km(sessions, LONG_RUN, 0.0)
+    weekly_long = typical_weekly_longest_km(sessions, 0.0)
+    long_km = max(classified_long, weekly_long)
+    if long_km <= 0:
+        long_km = TYPICAL_LONG_KM
     return LoadSnapshot(
         ctl=ctl,
         atl=atl,
         tsb=tsb,
         weekly_km=weekly_km(sessions, today),
         easy_km=typical_run_km(sessions, EASY_RUN, TYPICAL_EASY_KM),
-        long_km=typical_run_km(sessions, LONG_RUN, TYPICAL_LONG_KM),
+        long_km=long_km,
         weekly_load=weekly_load(sessions, today),
     )

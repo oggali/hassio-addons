@@ -76,6 +76,32 @@ def next_named_event(now: datetime, settings: Settings) -> tuple[datetime, str]:
     return events[0]
 
 
+def should_fire_named_event(
+    now: datetime,
+    target: datetime,
+    kind: str,
+    last_fired: tuple[date, str] | None,
+) -> bool:
+    """Fire only after the slot arrives, and only once per local day."""
+    if now < target:
+        return False
+    return last_fired != (now.date(), kind)
+
+
+def consume_daily_notify(store: CoachStore, day: date, kind: str) -> bool:
+    """Claim today's morning/evening notify. False if it was already sent."""
+    key = f"last_notify_{kind}"
+    token = day.isoformat()
+    if store.get_meta(key) == token:
+        return False
+    store.set_meta(key, token)
+    return True
+
+
+def morning_slot_passed(now: datetime, settings: Settings) -> bool:
+    return now >= at_time(now, settings.run_time)
+
+
 def wait_for_oura(client: HomeAssistantClient, settings: Settings) -> dict:
     deadline = datetime.now(settings.tz) + timedelta(minutes=settings.oura_wait_minutes)
     entity_ids = tracked_entity_ids(settings.strava_entity_prefix)
@@ -673,6 +699,7 @@ def main() -> None:
         log(f"Android notify {settings.mobile_notify_service} (ws {websocket_url(client.base_url)})")
 
     ran_startup = False
+    last_fired: tuple[date, str] | None = None
     last_poll = 0.0
     pending_prefs_at: float | None = None
     last_fingerprint = (store.current_prefs() or Prefs.defaults()).fingerprint
@@ -728,7 +755,17 @@ def main() -> None:
 
         if settings.run_immediately and not ran_startup:
             log("Running immediately on start")
-            run_once(client, settings, store, manager, wait_oura=False)
+            now = datetime.now(settings.tz)
+            notify = False
+            if morning_slot_passed(now, settings):
+                notify = consume_daily_notify(store, now.date(), "morning")
+                if notify:
+                    log("Morning slot already passed; notifying startup plan")
+                else:
+                    log("Morning already notified today; publishing without notify")
+            else:
+                log("Morning still ahead; publishing without notify")
+            run_once(client, settings, store, manager, wait_oura=False, notify=notify)
             ran_startup = True
 
         target, kind = next_named_event(datetime.now(settings.tz), settings)
@@ -744,12 +781,19 @@ def main() -> None:
             time.sleep(min(5.0, max(0.1, deadline - time.monotonic())))
         else:
             now = datetime.now(settings.tz)
-            if abs((now - target).total_seconds()) < 90 or now >= target:
+            if should_fire_named_event(now, target, kind, last_fired):
+                last_fired = (now.date(), kind)
                 if kind == "morning":
-                    run_once(client, settings, store, manager, wait_oura=True)
+                    if consume_daily_notify(store, now.date(), "morning"):
+                        run_once(client, settings, store, manager, wait_oura=True)
+                    else:
+                        log("Skipping duplicate morning notify")
                     time.sleep(60)
                 elif kind == "evening":
-                    run_evening(client, settings, store, manager)
+                    if consume_daily_notify(store, now.date(), "evening"):
+                        run_evening(client, settings, store, manager)
+                    else:
+                        log("Skipping duplicate evening notify")
                     time.sleep(60)
             continue
 
