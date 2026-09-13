@@ -25,6 +25,7 @@ from classify import (  # noqa: E402
     Session,
     classify_run,
     classify_sport,
+    is_training_session,
 )
 from entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
@@ -32,11 +33,13 @@ from entities import (  # noqa: E402
     GARMIN_HRV_NIGHT,
     GARMIN_TRAINING_READINESS,
     OURA_HRV_BALANCE,
+    OURA_LAST_WORKOUT_TYPE,
     OURA_READINESS,
     OURA_REST_MODE,
     OURA_SLEEP,
     OURA_SLEEP_HRV,
     OURA_TEMP,
+    OURA_WORKOUTS_TODAY,
     strava_slot_ids,
 )
 from features import build_snapshot  # noqa: E402
@@ -132,6 +135,15 @@ class ClassifyTests(unittest.TestCase):
         )
         self.assertEqual(classify_sport("AlpineSki", "Downhill day", 180, 110, 140, 75), OTHER)
 
+    def test_walk_is_not_training(self):
+        walk = Session(OTHER, "Afternoon walk", "Walk", SATURDAY.date(), duration_min=40)
+        run = Session(EASY_RUN, "Easy run", "Run", SATURDAY.date(), duration_min=40)
+        self.assertFalse(is_training_session(walk))
+        self.assertTrue(is_training_session(run))
+        self.assertEqual(classify_sport("Walk", "Afternoon walk", 40, 95, 110, 75), OTHER)
+        self.assertEqual(classify_sport("walking", "walking", 40, None, None, 75), OTHER)
+        self.assertEqual(classify_sport("running", "running", 50, None, None, 75), EASY_RUN)
+
     def test_ski_load_exceeds_same_bike(self):
         bike = Session(CROSS_HARD, "intervals", "Ride", SATURDAY.date(), duration_min=60)
         ski = Session(CROSS_HARD, "skate intervals", "NordicSki", SATURDAY.date(), duration_min=60)
@@ -157,6 +169,8 @@ class PlannerTests(unittest.TestCase):
         plan = self.plan(poor_recovery(), SATURDAY)
         self.assertEqual(plan.session_type, REST)
         self.assertEqual(plan.recovery_band, "poor")
+        self.assertIn("recovery looks poor", plan.why.lower())
+        self.assertNotIn("already", plan.why.lower())
 
     def test_long_run_yesterday(self):
         states = good_recovery()
@@ -209,6 +223,67 @@ class PlannerTests(unittest.TestCase):
         plan = self.plan(states, SATURDAY)
         self.assertEqual(plan.session_type, REST)
         self.assertIn("already", plan.why.lower())
+
+    def test_oura_walk_is_not_already_trained(self):
+        states = poor_recovery()
+        states[OURA_WORKOUTS_TODAY] = entity(
+            1,
+            SATURDAY,
+            workouts=[
+                {
+                    "activity": "walking",
+                    "day": "2026-08-22",
+                    "start_datetime": "2026-08-22T08:00:00+03:00",
+                    "end_datetime": "2026-08-22T08:40:00+03:00",
+                }
+            ],
+        )
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.session_type, REST)
+        self.assertIn("recovery looks poor", plan.why.lower())
+        self.assertNotIn("already", plan.why.lower())
+
+    def test_strava_walk_is_not_already_trained(self):
+        states = poor_recovery()
+        add_strava(states, 0, "Afternoon walk", "Walk", SATURDAY, 40, avg_hr=95, max_hr=110)
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.session_type, REST)
+        self.assertNotIn("already", plan.why.lower())
+
+    def test_oura_run_is_already_trained(self):
+        states = good_recovery()
+        states[OURA_WORKOUTS_TODAY] = entity(
+            1,
+            SATURDAY,
+            workouts=[
+                {
+                    "activity": "running",
+                    "day": "2026-08-22",
+                    "start_datetime": "2026-08-22T08:00:00+03:00",
+                    "end_datetime": "2026-08-22T08:50:00+03:00",
+                }
+            ],
+        )
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.session_type, REST)
+        self.assertIn("already", plan.why.lower())
+
+    def test_stale_oura_count_is_not_already_trained(self):
+        states = poor_recovery()
+        states[OURA_WORKOUTS_TODAY] = entity(1, SATURDAY)
+        states[OURA_LAST_WORKOUT_TYPE] = entity(
+            "running",
+            SATURDAY,
+            workout={
+                "activity": "running",
+                "day": "2026-08-21",
+                "start_datetime": "2026-08-21T18:00:00+03:00",
+                "end_datetime": "2026-08-21T19:00:00+03:00",
+            },
+        )
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.session_type, REST)
+        self.assertNotIn("already", plan.why.lower())
 
     def test_easy_bike_yesterday_does_not_block_quality(self):
         states = good_recovery()

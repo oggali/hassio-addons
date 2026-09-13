@@ -39,7 +39,7 @@ Finish-time math follows public race-prediction ideas (Riegel’s formula and a 
 
 At `evening_time` (default 20:30):
 
-- Telegram **always** recaps planned vs what Strava logged.
+- Telegram **always** recaps planned vs what Strava logged, and names tomorrow’s calendar session.
 - If **Android is off**, Telegram names the feeling / did-plan / skip-reason helpers so you can set them in HA.
 - If **`mobile_notify_service` is set**, the phone gets the same recap **plus** action buttons (Android allows three). Taps write those helpers. Telegram does **not** ask questions in that case.
 

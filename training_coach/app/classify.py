@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from parse import parse_date, parse_duration_minutes, parse_float, state_value
+from parse import coerce_date, parse_date, parse_duration_minutes, parse_float, state_value
 
 REST = "rest"
 EASY_RUN = "easy_run"
@@ -34,9 +34,20 @@ QUALITY = {INTERVALS, TEMPO}
 CROSS_TYPES = {CROSS_EASY, CROSS_HARD, CROSS_LONG}
 HARD_OR_LONG = {INTERVALS, TEMPO, LONG_RUN, CROSS_HARD, CROSS_LONG}
 RUN_TYPES = {EASY_RUN, LONG_RUN, INTERVALS, TEMPO}
+TRAINING_TYPES = RUN_TYPES | CROSS_TYPES | {STRENGTH}
+# Accidental GPS / stray auto-detects below this are not "already trained".
+MIN_TRAINING_MINUTES = 10.0
+MIN_TRAINING_METRES = 1000.0
 
-RUN_SPORTS = {"run", "trailrun", "virtualrun"}
-STRENGTH_SPORTS = {"weighttraining", "workout", "crossfit", "gym"}
+RUN_SPORTS = {"run", "running", "trailrun", "virtualrun"}
+STRENGTH_SPORTS = {
+    "weighttraining",
+    "weightlifting",
+    "strengthtraining",
+    "workout",
+    "crossfit",
+    "gym",
+}
 BIKE_SPORTS = {
     "ride",
     "virtualride",
@@ -121,6 +132,25 @@ SKI_TITLE_HINTS = (
     "cross-country",
     "hiihto",
 )
+
+
+def is_training_session(session: Session) -> bool:
+    """True for a structured run / gym / bike / ski, not a rest-day walk."""
+    if session.session_type not in TRAINING_TYPES:
+        return False
+    duration = session.duration_min
+    distance_m = session.distance_m
+    if duration is None and distance_m is None:
+        return True
+    if duration is not None and duration >= MIN_TRAINING_MINUTES:
+        return True
+    if distance_m is not None and distance_m >= MIN_TRAINING_METRES:
+        return True
+    return False
+
+
+def session_day(session: Session) -> date | None:
+    return coerce_date(session.when)
 
 
 @dataclass
@@ -286,7 +316,14 @@ def classify_sport(
     is_run = sport_n in RUN_SPORTS or (not sport_n and _looks_like_run(title))
     if is_run:
         return classify_run(title, duration_min, avg_hr, max_hr, long_run_min_minutes)
-    if sport_n in ALPINE_SPORTS or sport_n in {"walk", "hike", "hiking", "yoga", "pilates"}:
+    if sport_n in ALPINE_SPORTS or sport_n in {
+        "walk",
+        "walking",
+        "hike",
+        "hiking",
+        "yoga",
+        "pilates",
+    }:
         return OTHER
     if (
         sport_n in CROSS_SPORTS

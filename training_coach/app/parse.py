@@ -31,6 +31,21 @@ def attr(entity: dict[str, Any] | None, key: str, default: Any = None) -> Any:
     return (entity.get("attributes") or {}).get(key, default)
 
 
+def coerce_date(value: Any) -> date | None:
+    """Normalize DuckDB/HA timestamps to a calendar date."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def parse_float(value: Any) -> float | None:
     if is_unavailable(value):
         return None

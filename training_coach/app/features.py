@@ -7,7 +7,13 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from classify import Session, session_from_strava_slot
+from classify import (
+    Session,
+    classify_sport,
+    is_training_session,
+    session_day,
+    session_from_strava_slot,
+)
 from entities import (
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
@@ -18,6 +24,7 @@ from entities import (
     GARMIN_SLEEP_SCORE,
     GARMIN_TRAINING_READINESS,
     OURA_HRV_BALANCE,
+    OURA_LAST_WORKOUT_TYPE,
     OURA_READINESS,
     OURA_REST_MODE,
     OURA_SLEEP,
@@ -27,7 +34,16 @@ from entities import (
     STRAVA_LATEST_SPLITS,
     all_strava_slot_ids,
 )
-from parse import last_updated, parse_bool, parse_date, parse_float, state_value
+from parse import (
+    attr,
+    last_updated,
+    parse_bool,
+    parse_date,
+    parse_datetime,
+    parse_duration_minutes,
+    parse_float,
+    state_value,
+)
 from settings import Settings
 from splits import apply_splits_to_sessions, collect_split_sets
 
@@ -250,6 +266,62 @@ def merge_history_sessions(
     return existing + extra
 
 
+def _oura_item_is_training_today(
+    item: dict[str, Any],
+    tz: ZoneInfo,
+    today: date,
+    long_run_min_minutes: int,
+) -> bool:
+    """Oura auto-detects walks; those must not count as a logged training session."""
+    activity = str(item.get("activity") or item.get("type") or "")
+    when = parse_date(item.get("day") or item.get("start_datetime") or item.get("start"), tz)
+    if when != today:
+        return False
+    start = parse_datetime(item.get("start_datetime") or item.get("start"), tz)
+    end = parse_datetime(item.get("end_datetime") or item.get("end"), tz)
+    duration = None
+    if start and end:
+        duration = max(0.0, (end - start).total_seconds() / 60.0)
+    elif item.get("duration") is not None:
+        duration = parse_duration_minutes(item.get("duration"))
+    session_type = classify_sport(
+        activity, activity, duration, None, None, long_run_min_minutes
+    )
+    return is_training_session(
+        Session(session_type, activity, activity, when, duration_min=duration)
+    )
+
+
+def oura_structured_training_today(
+    states: dict[str, dict[str, Any]],
+    tz: ZoneInfo,
+    today: date,
+    long_run_min_minutes: int,
+) -> bool:
+    """True only if Oura logged a structured workout *today* (not a walk / stale count)."""
+    workouts = attr(states.get(OURA_WORKOUTS_TODAY), "workouts") or []
+    if isinstance(workouts, list) and workouts:
+        return any(
+            isinstance(item, dict)
+            and _oura_item_is_training_today(item, tz, today, long_run_min_minutes)
+            for item in workouts
+        )
+    raw = attr(states.get(OURA_LAST_WORKOUT_TYPE), "workout") or {}
+    if not isinstance(raw, dict) or not raw:
+        return False
+    activity = raw.get("activity") or state_value(states.get(OURA_LAST_WORKOUT_TYPE))
+    return _oura_item_is_training_today(
+        {**raw, "activity": activity},
+        tz,
+        today,
+        long_run_min_minutes,
+    )
+
+
+def already_trained_on(sessions: list[Session], day: date) -> bool:
+    return any(session_day(s) == day and is_training_session(s) for s in sessions)
+
+
 def oura_is_synced_today(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> bool:
     updated = last_updated(states.get(OURA_READINESS), tz)
     if updated and updated.date() == today:
@@ -293,8 +365,9 @@ def build_snapshot(
     recovery = score_recovery(states)
     if sessions is None:
         sessions = collect_live_sessions(states, settings, history, split_history)
-    workouts_today = parse_float(state_value(states.get(OURA_WORKOUTS_TODAY))) or 0
-    already = any(s.when == today for s in sessions) or workouts_today >= 1
+    already = already_trained_on(sessions, today) or oura_structured_training_today(
+        states, settings.tz, today, settings.long_run_min_minutes
+    )
     sessions = sorted(sessions, key=lambda s: s.when or date.min, reverse=True)
     return FeatureSnapshot(
         now=now,
@@ -307,12 +380,17 @@ def build_snapshot(
 
 
 def sessions_since(snapshot: FeatureSnapshot, start: date) -> list[Session]:
-    return [s for s in snapshot.sessions if s.when and s.when >= start]
+    out: list[Session] = []
+    for session in snapshot.sessions:
+        when = session_day(session)
+        if when and when >= start:
+            out.append(session)
+    return out
 
 
 def yesterday_session(snapshot: FeatureSnapshot) -> Session | None:
     target = snapshot.today - timedelta(days=1)
     for session in snapshot.sessions:
-        if session.when == target:
+        if session_day(session) == target and is_training_session(session):
             return session
     return None

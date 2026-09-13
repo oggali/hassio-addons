@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from classify import EASY_RUN, INTERVALS, LONG_RUN, REST, TEMPO, Session  # noqa: E402
+from classify import EASY_RUN, INTERVALS, LONG_RUN, REST, STRENGTH, TEMPO, Session  # noqa: E402
 from entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
@@ -25,7 +25,14 @@ from entities import (  # noqa: E402
     OURA_TEMP,
 )
 from features import build_snapshot  # noqa: E402
-from feedback import classify_compliance, parse_coach_action, recap_text  # noqa: E402
+from feedback import (  # noqa: E402
+    classify_compliance,
+    coaching_note,
+    describe_next_session,
+    parse_coach_action,
+    recap_text,
+    resolve_tomorrow_row,
+)
 from goal import Prefs  # noqa: E402
 from load import build_load_snapshot  # noqa: E402
 from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
@@ -200,6 +207,49 @@ class FeedbackTests(unittest.TestCase):
         self.assertIn("input_select.training_coach_feeling", text)
         silent = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=False)
         self.assertNotIn("input_select.training_coach_feeling", silent)
+
+    def test_match_names_calendar_tomorrow(self):
+        text = recap_text(
+            "Rest day",
+            REST,
+            None,
+            "match",
+            ask_helpers=False,
+            tomorrow="gym / strength",
+        )
+        self.assertIn("Tomorrow: gym / strength", text)
+        self.assertNotIn("Easy tomorrow", text)
+
+    def test_match_without_calendar_does_not_invent_easy(self):
+        note = coaching_note("match", REST, None)
+        self.assertEqual(note, "Nice — that matches the morning plan.")
+        self.assertNotIn("Easy tomorrow", note)
+
+    def test_describe_strength_and_tempo(self):
+        self.assertEqual(describe_next_session({"session_type": STRENGTH}), "gym / strength")
+        self.assertEqual(
+            describe_next_session(
+                {
+                    "session": TEMPO,
+                    "km": "9.9–12.6 km",
+                    "pace": "5:16–5:36",
+                }
+            ),
+            "tempo run 9.9–12.6 km @ 5:16–5:36",
+        )
+
+    def test_resolve_tomorrow_prefers_plan_row(self):
+        today = date(2026, 9, 13)
+        upcoming = [{"day": "2026-09-14", "session": EASY_RUN}]
+        row = resolve_tomorrow_row(
+            today,
+            plan_row={"session_type": STRENGTH},
+            upcoming=upcoming,
+        )
+        self.assertEqual(row["session_type"], STRENGTH)
+        from_upcoming = resolve_tomorrow_row(today, upcoming=upcoming)
+        self.assertEqual(from_upcoming["session"], EASY_RUN)
+        self.assertIsNone(resolve_tomorrow_row(today, upcoming=[{"day": "2026-09-15", "session": TEMPO}]))
 
 
 class OverlayTests(unittest.TestCase):

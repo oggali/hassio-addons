@@ -24,6 +24,8 @@ from classify import (
     TEMPO,
     Session,
     cross_label,
+    is_training_session,
+    session_day,
 )
 from features import FeatureSnapshot, sessions_since, yesterday_session
 from goal import Prefs
@@ -100,10 +102,11 @@ def summarize_week(snapshot: FeatureSnapshot) -> WeekCounts:
     counts = WeekCounts()
     days: set[date] = set()
     last_hard_at: date | None = None
-    for session in sorted(week, key=lambda s: s.when or date.min):
-        if not session.when:
+    for session in sorted(week, key=lambda s: session_day(s) or date.min):
+        when = session_day(session)
+        if not when or not is_training_session(session):
             continue
-        days.add(session.when)
+        days.add(when)
         if session.session_type == LONG_RUN:
             counts.long += 1
         elif session.session_type in QUALITY:
@@ -116,7 +119,7 @@ def summarize_week(snapshot: FeatureSnapshot) -> WeekCounts:
         else:
             counts.other += 1
         if session.session_type in HARD_OR_LONG:
-            last_hard_at = session.when
+            last_hard_at = when
     counts.training_days = len(days)
     if last_hard_at:
         counts.hours_since_hard = datetime_hours_since(snapshot, last_hard_at)

@@ -27,9 +27,11 @@ from feedback import (
     android_actions,
     classify_compliance,
     coaching_note,
+    describe_next_session,
     parse_coach_action,
     primary_actual,
     recap_text,
+    resolve_tomorrow_row,
     skip_reason_actions,
 )
 from goal import Prefs, days_to_race, format_hms, phase_for
@@ -502,6 +504,14 @@ def run_evening(
     actual = primary_actual(snapshot.sessions, snapshot.today)
     compliance = classify_compliance(planned_type, actual)
     recovery_band = decision["recovery_band"] if decision else snapshot.recovery.band
+    tomorrow = describe_next_session(
+        resolve_tomorrow_row(
+            snapshot.today,
+            plan_row=store.get_plan_day(snapshot.today + timedelta(days=1)),
+            upcoming=(decision.get("extra") or {}).get("upcoming") or [],
+        )
+    )
+    note = coaching_note(compliance, planned_type, actual, tomorrow=tomorrow)
     row = store.upsert_feedback(
         snapshot.today,
         planned_type=planned_type,
@@ -509,10 +519,17 @@ def run_evening(
         compliance=compliance,
         recovery_band=recovery_band,
         source="evening",
-        notes=coaching_note(compliance, planned_type, actual),
+        notes=note,
     )
     ask_helpers = not settings.mobile_enabled
-    message = recap_text(planned_title, planned_type, actual, compliance, ask_helpers=ask_helpers)
+    message = recap_text(
+        planned_title,
+        planned_type,
+        actual,
+        compliance,
+        ask_helpers=ask_helpers,
+        tomorrow=tomorrow,
+    )
     notify_message(client, settings, "Training coach evening", message, android=False, telegram=True)
     if settings.mobile_enabled:
         packs = android_actions(snapshot.today, compliance)

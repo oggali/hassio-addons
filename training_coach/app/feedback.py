@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
-from classify import QUALITY, REST, Session
+from classify import QUALITY, REST, Session, is_training_session, session_day
 from entities import DID_PLAN_HELPER, FEELING_HELPER, SKIP_REASON_HELPER
 from goal import DID_PLAN_OPTIONS, FEELING_OPTIONS, SKIP_REASON_OPTIONS
+from paces import format_pace_range
+from planner import TITLES
+from recipes import format_km_range
 
 COMPLIANCE_MATCH = "match"
 COMPLIANCE_FAMILY = "same_family"
@@ -16,7 +19,7 @@ COMPLIANCE_EXTRA = "extra"
 
 
 def primary_actual(sessions: list[Session], day: date) -> str | None:
-    today = [s for s in sessions if s.when == day]
+    today = [s for s in sessions if session_day(s) == day and is_training_session(s)]
     if not today:
         return None
     ranked = sorted(
@@ -42,19 +45,79 @@ def classify_compliance(planned: str | None, actual: str | None) -> str:
     return COMPLIANCE_SUBSTITUTED
 
 
-def coaching_note(compliance: str, planned: str | None, actual: str | None) -> str:
+def describe_next_session(row: dict | None) -> str | None:
+    """Human label for a plan_days / upcoming row, e.g. 'gym / strength'."""
+    if not row:
+        return None
+    session_type = row.get("session") or row.get("session_type")
+    if not session_type:
+        return None
+    title = TITLES.get(session_type, str(session_type).replace("_", " ")).lower()
+    km = row.get("km") or format_km_range(row.get("km_min"), row.get("km_max"))
+    pace = row.get("pace")
+    if not pace:
+        pace = format_pace_range(row.get("pace_min"), row.get("pace_max"))
+    parts = [title]
+    if km:
+        parts.append(str(km))
+    if pace:
+        parts.append(f"@ {pace}")
+    return " ".join(parts)
+
+
+def resolve_tomorrow_row(
+    today: date,
+    *,
+    plan_row: dict | None = None,
+    upcoming: list[dict] | None = None,
+) -> dict | None:
+    if plan_row:
+        return plan_row
+    target = (today + timedelta(days=1)).isoformat()
+    for item in upcoming or []:
+        day = item.get("day")
+        if hasattr(day, "isoformat"):
+            day = day.isoformat()
+        if day == target:
+            return item
+    return None
+
+
+def coaching_note(
+    compliance: str,
+    planned: str | None,
+    actual: str | None,
+    tomorrow: str | None = None,
+) -> str:
+    next_line = f" Tomorrow: {tomorrow}." if tomorrow else ""
     if compliance == COMPLIANCE_MATCH:
-        return "Nice — that matches the morning plan. Easy tomorrow unless the calendar says otherwise."
+        if tomorrow:
+            return f"Nice — that matches the morning plan.{next_line}"
+        return "Nice — that matches the morning plan."
     if compliance == COMPLIANCE_FAMILY:
+        if tomorrow:
+            return f"Quality work is in; intervals vs tempo is close enough.{next_line}"
         return "Quality work is in; intervals vs tempo is close enough. Keep the next hard session honest."
     if compliance == COMPLIANCE_SKIPPED:
         if planned in QUALITY:
-            return "Quality was skipped. Don’t cram it tomorrow; the next good-recovery day can pick it up."
+            return (
+                "Quality was skipped. Don’t cram it tomorrow; the next good-recovery day "
+                f"can pick it up.{next_line}"
+            )
         if planned == "long_run":
+            if tomorrow:
+                return f"Long run is still the weekend priority.{next_line}"
             return "Long run is still the weekend priority; midweek stays easy."
+        if tomorrow:
+            return f"Missed session noted. One skip is fine — don’t stack extra.{next_line}"
         return "Missed session noted. One skip is fine — don’t stack extra tomorrow."
     if compliance == COMPLIANCE_SUBSTITUTED:
-        return f"You did {actual or 'something else'} instead of {planned}. The week still counts; next hard day waits 48h."
+        return (
+            f"You did {actual or 'something else'} instead of {planned}. "
+            f"The week still counts; next hard day waits 48h.{next_line}"
+        )
+    if tomorrow:
+        return f"Extra session on a rest day — go easier if legs feel it.{next_line}"
     return "Extra session on a rest day — treat tomorrow as easier if legs feel it."
 
 
@@ -65,13 +128,14 @@ def recap_text(
     compliance: str,
     *,
     ask_helpers: bool,
+    tomorrow: str | None = None,
 ) -> str:
     actual_label = actual.replace("_", " ") if actual else "nothing logged"
     planned_label = planned_type.replace("_", " ") if planned_type else "rest"
     lines = [
         f"This morning: {planned_title}",
         f"Logged: {actual_label} (planned {planned_label} → {compliance}).",
-        coaching_note(compliance, planned_type, actual),
+        coaching_note(compliance, planned_type, actual, tomorrow=tomorrow),
     ]
     if ask_helpers:
         lines.append(

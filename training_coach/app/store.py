@@ -12,6 +12,7 @@ import duckdb
 from classify import Session
 from features import Recovery
 from goal import Prefs, normalize_race_distance
+from parse import coerce_date
 from planner import Plan
 from settings import Settings
 
@@ -19,17 +20,8 @@ SCHEMA_VERSION = "2"
 
 
 def _as_date(value: Any) -> date | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    text = str(value)[:10]
-    try:
-        return date.fromisoformat(text)
-    except ValueError:
-        return None
+    return coerce_date(value)
+
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -258,7 +250,7 @@ class CoachStore:
                     session_type=row[1],
                     title=row[2],
                     sport=row[3],
-                    when=row[4],
+                    when=_as_date(row[4]),
                     duration_min=row[5],
                     distance_m=row[6],
                     avg_hr=row[7],
