@@ -1,0 +1,42 @@
+# PR gate for the add-on monorepo.
+# Protect main so this workflow is required: feature branches only, no direct pushes.
+# GitHub (not this workflow) merges the PR after checks pass. Tagging is addon-tag.yml.
+name: Add-on CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: addon-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}"
+
+      - name: Test CI helpers
+        run: python3 .github/scripts/test_addon_ci.py -v
+
+      - name: Check version bumps
+        run: python3 .github/scripts/addon_ci.py check
+
+      - name: Run add-on tests
+        run: python3 .github/scripts/addon_ci.py test

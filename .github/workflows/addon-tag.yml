@@ -1,0 +1,40 @@
+# After a PR is merged to main, tag each changed add-on as <folder>/<version>
+# from that add-on's config.yaml and create a GitHub Release.
+name: Add-on tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: addon-tag-${{ github.event.pull_request.number }}
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true && github.event.pull_request.merge_commit_sha != ''
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout merge commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Fetch main history
+        run: git fetch origin "${{ github.event.pull_request.base.ref }}"
+
+      - name: Tag changed add-ons
+        run: python3 .github/scripts/addon_ci.py tag
