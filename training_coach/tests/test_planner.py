@@ -26,20 +26,27 @@ from classify import (  # noqa: E402
     classify_run,
     classify_sport,
     is_training_session,
+    session_day,
+    session_from_garmin_activity,
 )
 from entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
     GARMIN_HRV_NIGHT,
+    GARMIN_LAST_ACTIVITIES,
+    GARMIN_LAST_ACTIVITY,
+    GARMIN_TOTAL_STEPS,
     GARMIN_TRAINING_READINESS,
+    GARMIN_YESTERDAY_STEPS,
+    OURA_ACTIVE_CALORIES,
+    OURA_ACTIVITY_SCORE,
     OURA_HRV_BALANCE,
-    OURA_LAST_WORKOUT_TYPE,
     OURA_READINESS,
     OURA_REST_MODE,
     OURA_SLEEP,
     OURA_SLEEP_HRV,
+    OURA_STEPS,
     OURA_TEMP,
-    OURA_WORKOUTS_TODAY,
     strava_slot_ids,
 )
 from features import build_snapshot  # noqa: E402
@@ -99,6 +106,38 @@ def add_strava(states: dict, index: int, title: str, sport: str, when: datetime,
     return states
 
 
+def add_garmin(
+    states: dict,
+    title: str,
+    sport: str,
+    when: datetime,
+    minutes: int,
+    avg_hr=140,
+    max_hr=175,
+    activity_id=42,
+    distance_m=None,
+):
+    item = {
+        "activityName": title,
+        "activityType": sport,
+        "startTimeLocal": when.isoformat(),
+        "duration": minutes * 60,
+        "distance": distance_m if distance_m is not None else minutes * 180,
+        "averageHR": avg_hr,
+        "maxHR": max_hr,
+        "activityId": activity_id,
+    }
+    states[GARMIN_LAST_ACTIVITY] = entity(title, when, **item)
+    existing = []
+    if GARMIN_LAST_ACTIVITIES in states:
+        existing = list(
+            states[GARMIN_LAST_ACTIVITIES].get("attributes", {}).get("last_activities") or []
+        )
+    existing.append(item)
+    states[GARMIN_LAST_ACTIVITIES] = entity(len(existing), when, last_activities=existing)
+    return states
+
+
 class ClassifyTests(unittest.TestCase):
     def test_title_keywords(self):
         self.assertEqual(classify_run("Morning intervals", 40, 165, 180, 75), INTERVALS)
@@ -143,6 +182,27 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(classify_sport("Walk", "Afternoon walk", 40, 95, 110, 75), OTHER)
         self.assertEqual(classify_sport("walking", "walking", 40, None, None, 75), OTHER)
         self.assertEqual(classify_sport("running", "running", 50, None, None, 75), EASY_RUN)
+        self.assertEqual(classify_sport("fitness_equipment", "Gym", 40, None, None, 75), STRENGTH)
+
+    def test_garmin_activity_duration_is_seconds(self):
+        session = session_from_garmin_activity(
+            {
+                "activityName": "Lunch run",
+                "activityType": {"typeKey": "running"},
+                "startTimeLocal": SATURDAY.isoformat(),
+                "duration": 2400.5,
+                "distance": 7200,
+                "averageHR": 138,
+                "activityId": 99,
+            },
+            TZ,
+            75,
+        )
+        self.assertIsNotNone(session)
+        self.assertEqual(session.source, "garmin")
+        self.assertAlmostEqual(session.duration_min, 40.008, places=2)
+        self.assertEqual(session.session_type, EASY_RUN)
+        self.assertEqual(session.activity_id, "g:99")
 
     def test_ski_load_exceeds_same_bike(self):
         bike = Session(CROSS_HARD, "intervals", "Ride", SATURDAY.date(), duration_min=60)
@@ -226,7 +286,7 @@ class PlannerTests(unittest.TestCase):
 
     def test_oura_walk_is_not_already_trained(self):
         states = poor_recovery()
-        states[OURA_WORKOUTS_TODAY] = entity(
+        states["sensor.oura_ring_workouts_today"] = entity(
             1,
             SATURDAY,
             workouts=[
@@ -250,9 +310,9 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(plan.session_type, REST)
         self.assertNotIn("already", plan.why.lower())
 
-    def test_oura_run_is_already_trained(self):
+    def test_oura_run_is_not_already_trained(self):
         states = good_recovery()
-        states[OURA_WORKOUTS_TODAY] = entity(
+        states["sensor.oura_ring_workouts_today"] = entity(
             1,
             SATURDAY,
             workouts=[
@@ -265,13 +325,13 @@ class PlannerTests(unittest.TestCase):
             ],
         )
         plan = self.plan(states, SATURDAY)
-        self.assertEqual(plan.session_type, REST)
-        self.assertIn("already", plan.why.lower())
+        self.assertEqual(plan.session_type, LONG_RUN)
+        self.assertNotIn("already", plan.why.lower())
 
     def test_stale_oura_count_is_not_already_trained(self):
         states = poor_recovery()
-        states[OURA_WORKOUTS_TODAY] = entity(1, SATURDAY)
-        states[OURA_LAST_WORKOUT_TYPE] = entity(
+        states["sensor.oura_ring_workouts_today"] = entity(1, SATURDAY)
+        states["sensor.oura_ring_last_workout_type"] = entity(
             "running",
             SATURDAY,
             workout={
@@ -284,6 +344,48 @@ class PlannerTests(unittest.TestCase):
         plan = self.plan(states, SATURDAY)
         self.assertEqual(plan.session_type, REST)
         self.assertNotIn("already", plan.why.lower())
+
+    def test_garmin_run_is_already_trained(self):
+        states = good_recovery()
+        add_garmin(states, "Morning run", "running", SATURDAY, 40)
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.session_type, REST)
+        self.assertIn("already", plan.why.lower())
+
+    def test_garmin_walk_is_not_already_trained(self):
+        states = poor_recovery()
+        add_garmin(states, "Afternoon walk", "walking", SATURDAY, 40, avg_hr=95, max_hr=110)
+        plan = self.plan(states, SATURDAY)
+        self.assertEqual(plan.session_type, REST)
+        self.assertNotIn("already", plan.why.lower())
+
+    def test_garmin_duplicates_strava_same_run(self):
+        states = good_recovery()
+        add_strava(states, 0, "Easy run", "Run", SATURDAY, 40)
+        add_garmin(states, "Lunch run", "running", SATURDAY, 42, activity_id=7, distance_m=7200)
+        snap = build_snapshot(states, self.settings, now=SATURDAY)
+        today = [
+            s
+            for s in snap.sessions
+            if session_day(s) == SATURDAY.date() and is_training_session(s)
+        ]
+        self.assertEqual(len(today), 1)
+        self.assertEqual(today[0].source, "strava")
+        self.assertTrue(snap.already_trained_today)
+
+    def test_fused_activity_takes_higher_steps(self):
+        states = good_recovery()
+        states[OURA_STEPS] = entity(9000, SATURDAY)
+        states[OURA_ACTIVITY_SCORE] = entity(78, SATURDAY)
+        states[OURA_ACTIVE_CALORIES] = entity(420, SATURDAY)
+        states[GARMIN_TOTAL_STEPS] = entity(11000, SATURDAY)
+        states[GARMIN_YESTERDAY_STEPS] = entity(18400, SATURDAY)
+        snap = build_snapshot(states, self.settings, now=SATURDAY)
+        self.assertEqual(snap.activity.steps, 11000)
+        self.assertEqual(snap.activity.oura_steps, 9000)
+        self.assertEqual(snap.activity.insight_steps, 18400)
+        self.assertTrue(any("18.4k steps" in r for r in snap.recovery.reasons))
+        self.assertFalse(snap.already_trained_today)
 
     def test_easy_bike_yesterday_does_not_block_quality(self):
         states = good_recovery()

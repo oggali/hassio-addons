@@ -139,3 +139,14 @@ def last_updated(entity: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None
     if not entity:
         return None
     return parse_datetime(entity.get("last_updated") or entity.get("last_changed"), tz)
+
+
+def first_entity(states: dict[str, dict[str, Any]] | None, *entity_ids: str) -> dict[str, Any] | None:
+    """First available HA state among aliases (prefixed vs older unprefixed IDs)."""
+    if not states:
+        return None
+    for entity_id in entity_ids:
+        entity = states.get(entity_id)
+        if entity and not is_unavailable(state_value(entity)):
+            return entity
+    return None
