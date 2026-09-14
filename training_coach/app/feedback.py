@@ -17,6 +17,25 @@ COMPLIANCE_SUBSTITUTED = "substituted"
 COMPLIANCE_SKIPPED = "skipped"
 COMPLIANCE_EXTRA = "extra"
 
+TAG_CHECKIN_COMP = "training_coach_checkin_comp"
+TAG_CHECKIN_FEEL = "training_coach_checkin_feel"
+TAG_CHECKIN_SKIP = "training_coach_checkin_skip"
+ACK_TIMEOUT_SECONDS = 8
+ACK_LABELS = {
+    ("comp", "yes"): "Did it",
+    ("comp", "skipped"): "Skipped",
+    ("comp", "modified"): "Changed",
+    ("feel", "great"): "Great",
+    ("feel", "ok"): "OK",
+    ("feel", "tired"): "Tired",
+    ("feel", "wiped"): "Wiped",
+    ("skip", "no_time"): "No time",
+    ("skip", "tired"): "Tired",
+    ("skip", "sore"): "Sore",
+    ("skip", "weather"): "Weather",
+    ("skip", "other_sport"): "Other",
+}
+
 
 def primary_actual(sessions: list[Session], day: date) -> str | None:
     today = [s for s in sessions if session_day(s) == day and is_training_session(s)]
@@ -147,13 +166,61 @@ def recap_text(
     return "\n".join(lines)
 
 
+def checkin_tag(kind: str) -> str | None:
+    return {
+        "comp": TAG_CHECKIN_COMP,
+        "feel": TAG_CHECKIN_FEEL,
+        "skip": TAG_CHECKIN_SKIP,
+    }.get(kind)
+
+
+def action_ack_message(parsed: dict) -> str:
+    notes = str(parsed.get("notes") or "").strip()
+    if notes:
+        if len(notes) > 80:
+            notes = notes[:77] + "..."
+        return f"Logged: {notes}"
+    label = ACK_LABELS.get((parsed.get("kind"), parsed.get("option")))
+    return f"Logged: {label}" if label else "Logged"
+
+
+def android_followups(parsed: dict, day: date) -> list[dict]:
+    """Companion payloads after a button tap (same tag replaces the sticky card)."""
+    tag = checkin_tag(str(parsed.get("kind") or ""))
+    if not tag:
+        return []
+    if parsed.get("kind") == "comp" and parsed.get("option") == "skipped":
+        pack = skip_reason_actions(day)
+        return [
+            {"message": "clear_notification", "android_data": {"tag": tag}},
+            {
+                "message": "Why did you skip?",
+                "android_data": {
+                    "tag": pack["tag"],
+                    "actions": pack["actions"],
+                    "sticky": True,
+                },
+            },
+        ]
+    return [
+        {
+            "message": action_ack_message(parsed),
+            "android_data": {
+                "tag": tag,
+                "timeout": ACK_TIMEOUT_SECONDS,
+                "sticky": False,
+            },
+        }
+    ]
+
+
 def android_actions(day: date, compliance: str) -> list[dict]:
     key = day.isoformat()
     notices: list[dict] = []
     if compliance != COMPLIANCE_MATCH:
         notices.append(
             {
-                "tag": "training_coach_checkin_comp",
+                "tag": TAG_CHECKIN_COMP,
                 "actions": [
                     {"action": f"coach_{key}_comp_did", "title": "Did it"},
                     {"action": f"coach_{key}_comp_skipped", "title": "Skipped"},
@@ -163,7 +230,7 @@ def android_actions(day: date, compliance: str) -> list[dict]:
         )
     notices.append(
         {
-            "tag": "training_coach_checkin_feel",
+            "tag": TAG_CHECKIN_FEEL,
             "actions": [
                 {"action": f"coach_{key}_feel_great", "title": "Great"},
                 {"action": f"coach_{key}_feel_ok", "title": "OK"},
@@ -177,7 +244,7 @@ def android_actions(day: date, compliance: str) -> list[dict]:
 def skip_reason_actions(day: date) -> dict:
     key = day.isoformat()
     return {
-        "tag": "training_coach_checkin_skip",
+        "tag": TAG_CHECKIN_SKIP,
         "actions": [
             {"action": f"coach_{key}_skip_notime", "title": "No time"},
             {"action": f"coach_{key}_skip_sore", "title": "Sore"},

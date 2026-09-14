@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from datetime import date, timedelta
+from unittest.mock import MagicMock
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -26,6 +27,11 @@ from entities import (  # noqa: E402
 )
 from features import build_snapshot  # noqa: E402
 from feedback import (  # noqa: E402
+    ACK_TIMEOUT_SECONDS,
+    TAG_CHECKIN_COMP,
+    TAG_CHECKIN_FEEL,
+    TAG_CHECKIN_SKIP,
+    android_followups,
     classify_compliance,
     coaching_note,
     describe_next_session,
@@ -35,6 +41,7 @@ from feedback import (  # noqa: E402
 )
 from goal import Prefs  # noqa: E402
 from load import build_load_snapshot  # noqa: E402
+from main import handle_mobile_action  # noqa: E402
 from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
 from periodize import build_skeleton  # noqa: E402
 from planner import plan_day  # noqa: E402
@@ -201,6 +208,60 @@ class FeedbackTests(unittest.TestCase):
         other = parse_coach_action("coach_2026-09-12_skip_other", "weather was bad")
         self.assertEqual(other["option"], "other_sport")
         self.assertEqual(other["notes"], "weather was bad")
+
+    def test_feeling_tap_replaces_card_with_timed_ack(self):
+        parsed = parse_coach_action("coach_2026-09-12_feel_ok")
+        day = date(2026, 9, 12)
+        followups = android_followups(parsed, day)
+        self.assertEqual(len(followups), 1)
+        self.assertEqual(followups[0]["message"], "Logged: OK")
+        data = followups[0]["android_data"]
+        self.assertEqual(data["tag"], TAG_CHECKIN_FEEL)
+        self.assertEqual(data["timeout"], ACK_TIMEOUT_SECONDS)
+        self.assertFalse(data["sticky"])
+        self.assertNotIn("actions", data)
+
+    def test_skipped_clears_comp_and_asks_reason(self):
+        parsed = parse_coach_action("coach_2026-09-12_comp_skipped")
+        day = date(2026, 9, 12)
+        followups = android_followups(parsed, day)
+        self.assertEqual(followups[0]["message"], "clear_notification")
+        self.assertEqual(followups[0]["android_data"], {"tag": TAG_CHECKIN_COMP})
+        self.assertEqual(followups[1]["message"], "Why did you skip?")
+        skip_data = followups[1]["android_data"]
+        self.assertEqual(skip_data["tag"], TAG_CHECKIN_SKIP)
+        self.assertTrue(skip_data["sticky"])
+        self.assertEqual(len(skip_data["actions"]), 3)
+
+    def test_skip_reply_ack_uses_notes(self):
+        parsed = parse_coach_action("coach_2026-09-12_skip_other", "weather was bad")
+        followups = android_followups(parsed, date(2026, 9, 12))
+        self.assertEqual(followups[0]["message"], "Logged: weather was bad")
+        self.assertEqual(followups[0]["android_data"]["tag"], TAG_CHECKIN_SKIP)
+
+    def test_feeling_ack_goes_to_android_not_telegram(self):
+        store = MagicMock()
+        store.get_feedback.return_value = {"feeling": "ok", "day": date(2026, 9, 12)}
+        client = MagicMock()
+        settings = Settings(
+            notify_service="notify.tg_oskari",
+            mobile_notify_service="notify.mobile_app_galaxys26",
+        )
+        handle_mobile_action(
+            {"action": "coach_2026-09-12_feel_ok"},
+            store,
+            MagicMock(),
+            client,
+            settings,
+        )
+        notify_calls = [c for c in client.call_service.call_args_list if c.args[0] == "notify"]
+        self.assertEqual(len(notify_calls), 1)
+        _domain, service, payload = notify_calls[0].args
+        self.assertEqual(service, "mobile_app_galaxys26")
+        self.assertEqual(payload["message"], "Logged: OK")
+        self.assertEqual(payload["data"]["tag"], TAG_CHECKIN_FEEL)
+        self.assertFalse(payload["data"]["sticky"])
+        self.assertEqual(payload["data"]["timeout"], ACK_TIMEOUT_SECONDS)
 
     def test_telegram_helper_prompt_when_no_android(self):
         text = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=True)

@@ -41,7 +41,7 @@ At `evening_time` (default 20:30):
 
 - Telegram **always** recaps planned vs what Strava logged, and names tomorrow’s calendar session.
 - If **Android is off**, Telegram names the feeling / did-plan / skip-reason helpers so you can set them in HA.
-- If **`mobile_notify_service` is set**, the phone gets the same recap **plus** action buttons (Android allows three). Taps write those helpers. Telegram does **not** ask questions in that case.
+- If **`mobile_notify_service` is set**, the phone gets the same recap **plus** action buttons (Android allows three). Taps write those helpers, then that card becomes a short **Logged:** confirmation and auto-dismisses. Telegram does **not** ask questions in that case.
 
 Skipped-vs-done is stored even if you never tap. A late run after evening is corrected the next morning.
 

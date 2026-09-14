@@ -25,6 +25,7 @@ from entities import (
 from features import build_snapshot, collect_live_sessions
 from feedback import (
     android_actions,
+    android_followups,
     classify_compliance,
     coaching_note,
     describe_next_session,
@@ -32,7 +33,6 @@ from feedback import (
     primary_actual,
     recap_text,
     resolve_tomorrow_row,
-    skip_reason_actions,
 )
 from goal import Prefs, days_to_race, format_hms, phase_for
 from ha_client import HomeAssistantClient
@@ -655,23 +655,22 @@ def handle_mobile_action(
             fields["compliance"] = "substituted"
         elif option == "yes":
             fields["compliance"] = "match"
-        if option == "skipped":
-            pack = skip_reason_actions(day)
-            notify_message(
-                client,
-                settings,
-                "Training coach evening",
-                "Why did you skip?",
-                android_data={"tag": pack["tag"], "actions": pack["actions"]},
-                telegram=False,
-                android=True,
-            )
     elif parsed.get("field") == "skip_reason":
         fields["skip_reason"] = parsed["option"]
         if parsed.get("notes"):
             fields["notes"] = parsed["notes"]
     store.upsert_feedback(day, **fields)
     publish_feedback_sensor(client, store.get_feedback(day))
+    for item in android_followups(parsed, day):
+        notify_message(
+            client,
+            settings,
+            "Training coach evening",
+            item["message"],
+            android_data=item["android_data"],
+            telegram=False,
+            android=True,
+        )
     log(f"Android action {action} stored for {day}")
 
 
