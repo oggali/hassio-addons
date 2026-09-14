@@ -28,7 +28,7 @@ from feedback import (
     android_followups,
     classify_compliance,
     coaching_note,
-    describe_next_session,
+    describe_evening_tomorrow,
     format_logged_label,
     logged_sessions,
     parse_coach_action,
@@ -510,12 +510,13 @@ def run_evening(
     extras = [t for t in actuals if t != planned_type]
     compliance = classify_compliance(planned_type, actual, actuals=actuals)
     recovery_band = decision["recovery_band"] if decision else snapshot.recovery.band
-    tomorrow = describe_next_session(
+    tomorrow = describe_evening_tomorrow(
         resolve_tomorrow_row(
             snapshot.today,
             plan_row=store.get_plan_day(snapshot.today + timedelta(days=1)),
             upcoming=(decision.get("extra") or {}).get("upcoming") or [],
-        )
+        ),
+        today_sessions,
     )
     note = coaching_note(
         compliance,

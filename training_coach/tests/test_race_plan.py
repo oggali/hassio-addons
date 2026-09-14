@@ -34,6 +34,7 @@ from feedback import (  # noqa: E402
     android_followups,
     classify_compliance,
     coaching_note,
+    describe_evening_tomorrow,
     describe_next_session,
     format_logged_label,
     logged_sessions,
@@ -263,6 +264,34 @@ class FeedbackTests(unittest.TestCase):
             logged_count=2,
         )
         self.assertIn("Plus extra intervals", note)
+
+    def test_evening_tomorrow_flags_stacked_quality(self):
+        today = [
+            Session(INTERVALS, "Track", "Run", date(2026, 9, 14), duration_min=42, distance_m=7200),
+        ]
+        row = {
+            "session_type": INTERVALS,
+            "km": "6.6–8.4 km",
+            "pace": "4:58–5:18",
+        }
+        text = describe_evening_tomorrow(row, today)
+        self.assertIn("not intervals", text)
+        self.assertIn("too soon after today’s intervals", text)
+        self.assertIn("Calendar had intervals 6.6–8.4 km @ 4:58–5:18", text)
+        self.assertIn("morning will switch it", text)
+
+    def test_evening_tomorrow_keeps_calendar_when_spacing_ok(self):
+        gym = [Session(STRENGTH, "Gym", "WeightTraining", date(2026, 9, 14), duration_min=50)]
+        row = {"session_type": INTERVALS, "km": "6.6–8.4 km", "pace": "4:58–5:18"}
+        self.assertEqual(
+            describe_evening_tomorrow(row, gym),
+            "intervals 6.6–8.4 km @ 4:58–5:18",
+        )
+        easy_cal = {"session_type": "easy_run", "km": "6–10 km"}
+        quality = [
+            Session(INTERVALS, "Track", "Run", date(2026, 9, 14), duration_min=42),
+        ]
+        self.assertEqual(describe_evening_tomorrow(easy_cal, quality), "easy run 6–10 km")
 
     def test_parse_android_action(self):
         parsed = parse_coach_action("coach_2026-09-12_feel_great")

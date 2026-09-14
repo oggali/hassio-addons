@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from classify import QUALITY, REST, Session, is_training_session, session_day
+from classify import HARD_OR_LONG, QUALITY, REST, Session, is_training_session, session_day
 from entities import DID_PLAN_HELPER, FEELING_HELPER, SKIP_REASON_HELPER
 from goal import DID_PLAN_OPTIONS, FEELING_OPTIONS, SKIP_REASON_OPTIONS
 from paces import format_pace_range
@@ -130,6 +130,32 @@ def describe_next_session(row: dict | None) -> str | None:
     if pace:
         parts.append(f"@ {pace}")
     return " ".join(parts)
+
+
+def describe_evening_tomorrow(
+    tomorrow_row: dict | None,
+    today_sessions: list[Session],
+) -> str | None:
+    """Calendar label, plus a 48h-hard caveat when tonight already did quality/long.
+
+    Evening cannot know tomorrow's recovery, so it does not pick easy vs rest —
+    only that another hard/long day is off the table.
+    """
+    calendar = describe_next_session(tomorrow_row)
+    if not calendar:
+        return None
+    tomorrow_type = (tomorrow_row or {}).get("session") or (tomorrow_row or {}).get("session_type")
+    today_hard = [s for s in today_sessions if s.session_type in HARD_OR_LONG]
+    if not today_hard or tomorrow_type not in HARD_OR_LONG:
+        return calendar
+    done = TITLES.get(
+        today_hard[0].session_type, str(today_hard[0].session_type).replace("_", " ")
+    ).lower()
+    planned = TITLES.get(tomorrow_type, str(tomorrow_type).replace("_", " ")).lower()
+    return (
+        f"not {planned} — too soon after today’s {done}. "
+        f"Calendar had {calendar}; morning will switch it"
+    )
 
 
 def resolve_tomorrow_row(
