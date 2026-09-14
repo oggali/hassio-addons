@@ -94,11 +94,25 @@ def poor_recovery() -> dict:
     return states
 
 
-def add_strava(states: dict, index: int, title: str, sport: str, when: datetime, minutes: int, avg_hr=140, max_hr=175):
+def add_strava(
+    states: dict,
+    index: int,
+    title: str,
+    sport: str,
+    when: datetime,
+    minutes: int,
+    avg_hr=140,
+    max_hr=175,
+    activity_id=None,
+    distance_m=None,
+):
     slot = strava_slot_ids("sensor.strava_oskari_vuorinen", index)
-    states[slot.activity] = entity(title, sport_type=sport)
+    attrs = {"sport_type": sport}
+    if activity_id is not None:
+        attrs["activity_id"] = activity_id
+    states[slot.activity] = entity(title, **attrs)
     states[slot.date] = entity(when.isoformat())
-    states[slot.distance] = entity(minutes * 180)
+    states[slot.distance] = entity(distance_m if distance_m is not None else minutes * 180)
     states[slot.moving_time] = entity(minutes * 60)
     states[slot.elapsed_time] = entity(minutes * 60)
     states[slot.average_heartrate] = entity(avg_hr)
@@ -283,6 +297,20 @@ class PlannerTests(unittest.TestCase):
         plan = self.plan(states, SATURDAY)
         self.assertEqual(plan.session_type, REST)
         self.assertIn("already", plan.why.lower())
+
+    def test_two_sessions_same_day_are_both_kept(self):
+        states = good_recovery()
+        add_strava(
+            states, 0, "Track intervals", "Run", SATURDAY, 42,
+            avg_hr=168, max_hr=185, activity_id=11,
+        )
+        add_strava(
+            states, 1, "Gym", "WeightTraining", SATURDAY, 50,
+            avg_hr=110, max_hr=140, activity_id=12, distance_m=0,
+        )
+        snap = build_snapshot(states, self.settings, now=SATURDAY)
+        today = [s for s in snap.sessions if s.when == SATURDAY.date()]
+        self.assertEqual(sorted(s.session_type for s in today), [INTERVALS, STRENGTH])
 
     def test_oura_walk_is_not_already_trained(self):
         states = poor_recovery()

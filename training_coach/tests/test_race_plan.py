@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from datetime import date, timedelta
+from unittest.mock import MagicMock
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -26,15 +27,25 @@ from entities import (  # noqa: E402
 )
 from features import DayActivity, build_snapshot  # noqa: E402
 from feedback import (  # noqa: E402
+    ACK_TIMEOUT_SECONDS,
+    TAG_CHECKIN_COMP,
+    TAG_CHECKIN_FEEL,
+    TAG_CHECKIN_SKIP,
+    android_followups,
     classify_compliance,
     coaching_note,
+    describe_evening_tomorrow,
     describe_next_session,
+    format_logged_label,
+    logged_sessions,
     parse_coach_action,
+    primary_actual,
     recap_text,
     resolve_tomorrow_row,
 )
 from goal import Prefs  # noqa: E402
 from load import build_load_snapshot  # noqa: E402
+from main import handle_mobile_action  # noqa: E402
 from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
 from periodize import build_skeleton  # noqa: E402
 from planner import plan_day  # noqa: E402
@@ -191,6 +202,96 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(classify_compliance(INTERVALS, TEMPO), "same_family")
         self.assertEqual(classify_compliance(INTERVALS, EASY_RUN), "substituted")
         self.assertEqual(classify_compliance(REST, EASY_RUN), "extra")
+        self.assertEqual(
+            classify_compliance(STRENGTH, INTERVALS, actuals=[INTERVALS, STRENGTH]),
+            "match",
+        )
+        self.assertEqual(
+            classify_compliance(REST, INTERVALS, actuals=[INTERVALS, STRENGTH]),
+            "extra",
+        )
+
+    def test_two_sessions_listed_in_recap(self):
+        day = date(2026, 9, 14)
+        sessions = [
+            Session(
+                INTERVALS,
+                "Track",
+                "Run",
+                day,
+                duration_min=42,
+                distance_m=7200,
+                activity_id="1",
+            ),
+            Session(
+                STRENGTH,
+                "Gym",
+                "WeightTraining",
+                day,
+                duration_min=50,
+                activity_id="2",
+            ),
+        ]
+        logged = logged_sessions(sessions, day)
+        self.assertEqual([s.session_type for s in logged], [INTERVALS, STRENGTH])
+        self.assertEqual(primary_actual(sessions, day), INTERVALS)
+        label = format_logged_label(logged)
+        self.assertIn("intervals", label)
+        self.assertIn("7.2 km", label)
+        self.assertIn("gym / strength", label)
+        self.assertIn("50 min", label)
+        text = recap_text(
+            "Rest day",
+            REST,
+            INTERVALS,
+            "extra",
+            ask_helpers=False,
+            tomorrow="intervals 6.6–8.4 km @ 4:58–5:18",
+            logged_label=label,
+            extras=[STRENGTH],
+            logged_count=2,
+        )
+        self.assertIn("Logged: intervals 7.2 km, gym / strength 50 min", text)
+        self.assertIn("Extra sessions on a rest day", text)
+        self.assertNotRegex(text, r"Logged: intervals \(planned")
+
+    def test_planned_session_still_matches_when_stacked(self):
+        note = coaching_note(
+            "match",
+            STRENGTH,
+            STRENGTH,
+            extras=[INTERVALS],
+            logged_count=2,
+        )
+        self.assertIn("Plus extra intervals", note)
+
+    def test_evening_tomorrow_flags_stacked_quality(self):
+        today = [
+            Session(INTERVALS, "Track", "Run", date(2026, 9, 14), duration_min=42, distance_m=7200),
+        ]
+        row = {
+            "session_type": INTERVALS,
+            "km": "6.6–8.4 km",
+            "pace": "4:58–5:18",
+        }
+        text = describe_evening_tomorrow(row, today)
+        self.assertIn("not intervals", text)
+        self.assertIn("too soon after today’s intervals", text)
+        self.assertIn("Calendar had intervals 6.6–8.4 km @ 4:58–5:18", text)
+        self.assertIn("morning will switch it", text)
+
+    def test_evening_tomorrow_keeps_calendar_when_spacing_ok(self):
+        gym = [Session(STRENGTH, "Gym", "WeightTraining", date(2026, 9, 14), duration_min=50)]
+        row = {"session_type": INTERVALS, "km": "6.6–8.4 km", "pace": "4:58–5:18"}
+        self.assertEqual(
+            describe_evening_tomorrow(row, gym),
+            "intervals 6.6–8.4 km @ 4:58–5:18",
+        )
+        easy_cal = {"session_type": "easy_run", "km": "6–10 km"}
+        quality = [
+            Session(INTERVALS, "Track", "Run", date(2026, 9, 14), duration_min=42),
+        ]
+        self.assertEqual(describe_evening_tomorrow(easy_cal, quality), "easy run 6–10 km")
 
     def test_parse_android_action(self):
         parsed = parse_coach_action("coach_2026-09-12_feel_great")
@@ -201,6 +302,60 @@ class FeedbackTests(unittest.TestCase):
         other = parse_coach_action("coach_2026-09-12_skip_other", "weather was bad")
         self.assertEqual(other["option"], "other_sport")
         self.assertEqual(other["notes"], "weather was bad")
+
+    def test_feeling_tap_replaces_card_with_timed_ack(self):
+        parsed = parse_coach_action("coach_2026-09-12_feel_ok")
+        day = date(2026, 9, 12)
+        followups = android_followups(parsed, day)
+        self.assertEqual(len(followups), 1)
+        self.assertEqual(followups[0]["message"], "Logged: OK")
+        data = followups[0]["android_data"]
+        self.assertEqual(data["tag"], TAG_CHECKIN_FEEL)
+        self.assertEqual(data["timeout"], ACK_TIMEOUT_SECONDS)
+        self.assertFalse(data["sticky"])
+        self.assertNotIn("actions", data)
+
+    def test_skipped_clears_comp_and_asks_reason(self):
+        parsed = parse_coach_action("coach_2026-09-12_comp_skipped")
+        day = date(2026, 9, 12)
+        followups = android_followups(parsed, day)
+        self.assertEqual(followups[0]["message"], "clear_notification")
+        self.assertEqual(followups[0]["android_data"], {"tag": TAG_CHECKIN_COMP})
+        self.assertEqual(followups[1]["message"], "Why did you skip?")
+        skip_data = followups[1]["android_data"]
+        self.assertEqual(skip_data["tag"], TAG_CHECKIN_SKIP)
+        self.assertTrue(skip_data["sticky"])
+        self.assertEqual(len(skip_data["actions"]), 3)
+
+    def test_skip_reply_ack_uses_notes(self):
+        parsed = parse_coach_action("coach_2026-09-12_skip_other", "weather was bad")
+        followups = android_followups(parsed, date(2026, 9, 12))
+        self.assertEqual(followups[0]["message"], "Logged: weather was bad")
+        self.assertEqual(followups[0]["android_data"]["tag"], TAG_CHECKIN_SKIP)
+
+    def test_feeling_ack_goes_to_android_not_telegram(self):
+        store = MagicMock()
+        store.get_feedback.return_value = {"feeling": "ok", "day": date(2026, 9, 12)}
+        client = MagicMock()
+        settings = Settings(
+            notify_service="notify.tg_oskari",
+            mobile_notify_service="notify.mobile_app_galaxys26",
+        )
+        handle_mobile_action(
+            {"action": "coach_2026-09-12_feel_ok"},
+            store,
+            MagicMock(),
+            client,
+            settings,
+        )
+        notify_calls = [c for c in client.call_service.call_args_list if c.args[0] == "notify"]
+        self.assertEqual(len(notify_calls), 1)
+        _domain, service, payload = notify_calls[0].args
+        self.assertEqual(service, "mobile_app_galaxys26")
+        self.assertEqual(payload["message"], "Logged: OK")
+        self.assertEqual(payload["data"]["tag"], TAG_CHECKIN_FEEL)
+        self.assertFalse(payload["data"]["sticky"])
+        self.assertEqual(payload["data"]["timeout"], ACK_TIMEOUT_SECONDS)
 
     def test_telegram_helper_prompt_when_no_android(self):
         text = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=True)

@@ -25,14 +25,15 @@ from entities import (
 from features import build_snapshot, collect_live_sessions
 from feedback import (
     android_actions,
+    android_followups,
     classify_compliance,
     coaching_note,
-    describe_next_session,
+    describe_evening_tomorrow,
+    format_logged_label,
+    logged_sessions,
     parse_coach_action,
-    primary_actual,
     recap_text,
     resolve_tomorrow_row,
-    skip_reason_actions,
 )
 from goal import Prefs, days_to_race, format_hms, phase_for
 from ha_client import HomeAssistantClient
@@ -382,13 +383,15 @@ def reconcile_yesterday(store: CoachStore, snapshot) -> None:
     fb = store.get_feedback(yesterday)
     if not fb or fb.get("compliance") != "skipped":
         return
-    actual = primary_actual(snapshot.sessions, yesterday)
+    today_sessions = logged_sessions(snapshot.sessions, yesterday)
+    actuals = [s.session_type for s in today_sessions]
+    actual = actuals[0] if actuals else None
     if not actual:
         return
-    compliance = classify_compliance(fb.get("planned_type"), actual)
+    compliance = classify_compliance(fb.get("planned_type"), actual, actuals=actuals)
     store.upsert_feedback(
         yesterday,
-        actual_type=actual,
+        actual_type=",".join(actuals),
         compliance=compliance,
         source="late_session",
     )
@@ -504,21 +507,32 @@ def run_evening(
     manager.reset_feedback_helpers()
     planned_type = decision["session_type"] if decision else None
     planned_title = decision["title"] if decision else "No morning plan"
-    actual = primary_actual(snapshot.sessions, snapshot.today)
-    compliance = classify_compliance(planned_type, actual)
+    today_sessions = logged_sessions(snapshot.sessions, snapshot.today)
+    actuals = [s.session_type for s in today_sessions]
+    actual = actuals[0] if actuals else None
+    extras = [t for t in actuals if t != planned_type]
+    compliance = classify_compliance(planned_type, actual, actuals=actuals)
     recovery_band = decision["recovery_band"] if decision else snapshot.recovery.band
-    tomorrow = describe_next_session(
+    tomorrow = describe_evening_tomorrow(
         resolve_tomorrow_row(
             snapshot.today,
             plan_row=store.get_plan_day(snapshot.today + timedelta(days=1)),
             upcoming=(decision.get("extra") or {}).get("upcoming") or [],
-        )
+        ),
+        today_sessions,
     )
-    note = coaching_note(compliance, planned_type, actual, tomorrow=tomorrow)
+    note = coaching_note(
+        compliance,
+        planned_type,
+        actual,
+        tomorrow=tomorrow,
+        extras=extras,
+        logged_count=len(today_sessions),
+    )
     row = store.upsert_feedback(
         snapshot.today,
         planned_type=planned_type,
-        actual_type=actual,
+        actual_type=",".join(actuals) if actuals else actual,
         compliance=compliance,
         recovery_band=recovery_band,
         source="evening",
@@ -532,6 +546,9 @@ def run_evening(
         compliance,
         ask_helpers=ask_helpers,
         tomorrow=tomorrow,
+        logged_label=format_logged_label(today_sessions),
+        extras=extras,
+        logged_count=len(today_sessions),
         activity=snapshot.activity,
     )
     notify_message(client, settings, "Training coach evening", message, android=False, telegram=True)
@@ -555,7 +572,7 @@ def run_evening(
                 android=True,
             )
     publish_feedback_sensor(client, row)
-    log(f"Evening check-in: {compliance} planned={planned_type} actual={actual}")
+    log(f"Evening check-in: {compliance} planned={planned_type} actual={','.join(actuals) or actual}")
 
 
 def apply_checkin(store: CoachStore, manager: PrefsManager, payload: dict, today: date) -> None:
@@ -659,23 +676,22 @@ def handle_mobile_action(
             fields["compliance"] = "substituted"
         elif option == "yes":
             fields["compliance"] = "match"
-        if option == "skipped":
-            pack = skip_reason_actions(day)
-            notify_message(
-                client,
-                settings,
-                "Training coach evening",
-                "Why did you skip?",
-                android_data={"tag": pack["tag"], "actions": pack["actions"]},
-                telegram=False,
-                android=True,
-            )
     elif parsed.get("field") == "skip_reason":
         fields["skip_reason"] = parsed["option"]
         if parsed.get("notes"):
             fields["notes"] = parsed["notes"]
     store.upsert_feedback(day, **fields)
     publish_feedback_sensor(client, store.get_feedback(day))
+    for item in android_followups(parsed, day):
+        notify_message(
+            client,
+            settings,
+            "Training coach evening",
+            item["message"],
+            android_data=item["android_data"],
+            telegram=False,
+            android=True,
+        )
     log(f"Android action {action} stored for {day}")
 
 
