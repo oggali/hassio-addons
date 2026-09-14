@@ -37,29 +37,77 @@ ACK_LABELS = {
 }
 
 
-def primary_actual(sessions: list[Session], day: date) -> str | None:
-    today = [s for s in sessions if session_day(s) == day and is_training_session(s)]
-    if not today:
-        return None
-    ranked = sorted(
-        today,
-        key=lambda s: (
-            0 if s.session_type in QUALITY else 1 if s.session_type != REST else 2,
-            -(s.duration_min or 0),
-        ),
+def _session_rank_key(session: Session) -> tuple:
+    return (
+        0 if session.session_type in QUALITY else 1 if session.session_type != REST else 2,
+        -(session.duration_min or 0),
     )
-    return ranked[0].session_type
 
 
-def classify_compliance(planned: str | None, actual: str | None) -> str:
+def _session_dedupe_key(session: Session) -> tuple:
+    if session.activity_id:
+        return ("id", str(session.activity_id))
+    return (
+        "t",
+        session.title,
+        session.session_type,
+        round(session.duration_min or 0, 1),
+        round(session.distance_m or 0, 0),
+    )
+
+
+def logged_sessions(sessions: list[Session], day: date) -> list[Session]:
+    """Today's structured workouts, quality-first, one row per activity."""
+    today = [s for s in sessions if session_day(s) == day and is_training_session(s)]
+    uniq: list[Session] = []
+    seen: set[tuple] = set()
+    for session in today:
+        key = _session_dedupe_key(session)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(session)
+    return sorted(uniq, key=_session_rank_key)
+
+
+def primary_actual(sessions: list[Session], day: date) -> str | None:
+    today = logged_sessions(sessions, day)
+    return today[0].session_type if today else None
+
+
+def describe_logged_session(session: Session) -> str:
+    title = TITLES.get(session.session_type, str(session.session_type).replace("_", " ")).lower()
+    parts = [title]
+    if session.distance_m is not None and session.distance_m >= 500:
+        parts.append(f"{session.distance_m / 1000.0:.1f} km")
+    elif session.duration_min:
+        parts.append(f"{int(round(session.duration_min))} min")
+    return " ".join(parts)
+
+
+def format_logged_label(sessions: list[Session]) -> str:
+    if not sessions:
+        return "nothing logged"
+    return ", ".join(describe_logged_session(s) for s in sessions)
+
+
+def classify_compliance(
+    planned: str | None,
+    actual: str | None,
+    actuals: list[str] | None = None,
+) -> str:
     planned = planned or REST
+    if actuals is None:
+        types = [actual] if actual else []
+    else:
+        types = [t for t in actuals if t]
     if planned == REST:
-        return COMPLIANCE_MATCH if actual is None else COMPLIANCE_EXTRA
-    if actual is None:
+        return COMPLIANCE_MATCH if not types else COMPLIANCE_EXTRA
+    if not types:
         return COMPLIANCE_SKIPPED
-    if actual == planned:
+    if planned in types:
         return COMPLIANCE_MATCH
-    if planned in QUALITY and actual in QUALITY:
+    if planned in QUALITY and any(t in QUALITY for t in types):
         return COMPLIANCE_FAMILY
     return COMPLIANCE_SUBSTITUTED
 
@@ -107,16 +155,29 @@ def coaching_note(
     planned: str | None,
     actual: str | None,
     tomorrow: str | None = None,
+    *,
+    extras: list[str] | None = None,
+    logged_count: int = 0,
 ) -> str:
     next_line = f" Tomorrow: {tomorrow}." if tomorrow else ""
+    extra_types = [t for t in (extras or []) if t and t != planned]
+    extra_bit = ""
+    if extra_types:
+        labels = ", ".join(
+            TITLES.get(t, str(t).replace("_", " ")).lower() for t in extra_types
+        )
+        extra_bit = f" Plus extra {labels}."
     if compliance == COMPLIANCE_MATCH:
         if tomorrow:
-            return f"Nice — that matches the morning plan.{next_line}"
-        return "Nice — that matches the morning plan."
+            return f"Nice — that matches the morning plan.{extra_bit}{next_line}"
+        return f"Nice — that matches the morning plan.{extra_bit}".rstrip()
     if compliance == COMPLIANCE_FAMILY:
         if tomorrow:
-            return f"Quality work is in; intervals vs tempo is close enough.{next_line}"
-        return "Quality work is in; intervals vs tempo is close enough. Keep the next hard session honest."
+            return f"Quality work is in; intervals vs tempo is close enough.{extra_bit}{next_line}"
+        return (
+            "Quality work is in; intervals vs tempo is close enough. "
+            f"Keep the next hard session honest.{extra_bit}"
+        )
     if compliance == COMPLIANCE_SKIPPED:
         if planned in QUALITY:
             return (
@@ -135,9 +196,10 @@ def coaching_note(
             f"You did {actual or 'something else'} instead of {planned}. "
             f"The week still counts; next hard day waits 48h.{next_line}"
         )
+    noun = "sessions" if logged_count > 1 else "session"
     if tomorrow:
-        return f"Extra session on a rest day — go easier if legs feel it.{next_line}"
-    return "Extra session on a rest day — treat tomorrow as easier if legs feel it."
+        return f"Extra {noun} on a rest day — go easier if legs feel it.{next_line}"
+    return f"Extra {noun} on a rest day — treat tomorrow as easier if legs feel it."
 
 
 def recap_text(
@@ -148,13 +210,24 @@ def recap_text(
     *,
     ask_helpers: bool,
     tomorrow: str | None = None,
+    logged_label: str | None = None,
+    extras: list[str] | None = None,
+    logged_count: int = 0,
 ) -> str:
-    actual_label = actual.replace("_", " ") if actual else "nothing logged"
+    actual_label = logged_label or (actual.replace("_", " ") if actual else "nothing logged")
     planned_label = planned_type.replace("_", " ") if planned_type else "rest"
+    count = logged_count or (0 if actual_label == "nothing logged" else 1)
     lines = [
         f"This morning: {planned_title}",
         f"Logged: {actual_label} (planned {planned_label} → {compliance}).",
-        coaching_note(compliance, planned_type, actual, tomorrow=tomorrow),
+        coaching_note(
+            compliance,
+            planned_type,
+            actual,
+            tomorrow=tomorrow,
+            extras=extras,
+            logged_count=count,
+        ),
     ]
     if ask_helpers:
         lines.append(

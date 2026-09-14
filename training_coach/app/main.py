@@ -29,8 +29,9 @@ from feedback import (
     classify_compliance,
     coaching_note,
     describe_next_session,
+    format_logged_label,
+    logged_sessions,
     parse_coach_action,
-    primary_actual,
     recap_text,
     resolve_tomorrow_row,
 )
@@ -380,13 +381,15 @@ def reconcile_yesterday(store: CoachStore, snapshot) -> None:
     fb = store.get_feedback(yesterday)
     if not fb or fb.get("compliance") != "skipped":
         return
-    actual = primary_actual(snapshot.sessions, yesterday)
+    today_sessions = logged_sessions(snapshot.sessions, yesterday)
+    actuals = [s.session_type for s in today_sessions]
+    actual = actuals[0] if actuals else None
     if not actual:
         return
-    compliance = classify_compliance(fb.get("planned_type"), actual)
+    compliance = classify_compliance(fb.get("planned_type"), actual, actuals=actuals)
     store.upsert_feedback(
         yesterday,
-        actual_type=actual,
+        actual_type=",".join(actuals),
         compliance=compliance,
         source="late_session",
     )
@@ -501,8 +504,11 @@ def run_evening(
     manager.reset_feedback_helpers()
     planned_type = decision["session_type"] if decision else None
     planned_title = decision["title"] if decision else "No morning plan"
-    actual = primary_actual(snapshot.sessions, snapshot.today)
-    compliance = classify_compliance(planned_type, actual)
+    today_sessions = logged_sessions(snapshot.sessions, snapshot.today)
+    actuals = [s.session_type for s in today_sessions]
+    actual = actuals[0] if actuals else None
+    extras = [t for t in actuals if t != planned_type]
+    compliance = classify_compliance(planned_type, actual, actuals=actuals)
     recovery_band = decision["recovery_band"] if decision else snapshot.recovery.band
     tomorrow = describe_next_session(
         resolve_tomorrow_row(
@@ -511,11 +517,18 @@ def run_evening(
             upcoming=(decision.get("extra") or {}).get("upcoming") or [],
         )
     )
-    note = coaching_note(compliance, planned_type, actual, tomorrow=tomorrow)
+    note = coaching_note(
+        compliance,
+        planned_type,
+        actual,
+        tomorrow=tomorrow,
+        extras=extras,
+        logged_count=len(today_sessions),
+    )
     row = store.upsert_feedback(
         snapshot.today,
         planned_type=planned_type,
-        actual_type=actual,
+        actual_type=",".join(actuals) if actuals else actual,
         compliance=compliance,
         recovery_band=recovery_band,
         source="evening",
@@ -529,6 +542,9 @@ def run_evening(
         compliance,
         ask_helpers=ask_helpers,
         tomorrow=tomorrow,
+        logged_label=format_logged_label(today_sessions),
+        extras=extras,
+        logged_count=len(today_sessions),
     )
     notify_message(client, settings, "Training coach evening", message, android=False, telegram=True)
     if settings.mobile_enabled:
@@ -551,7 +567,7 @@ def run_evening(
                 android=True,
             )
     publish_feedback_sensor(client, row)
-    log(f"Evening check-in: {compliance} planned={planned_type} actual={actual}")
+    log(f"Evening check-in: {compliance} planned={planned_type} actual={','.join(actuals) or actual}")
 
 
 def apply_checkin(store: CoachStore, manager: PrefsManager, payload: dict, today: date) -> None:

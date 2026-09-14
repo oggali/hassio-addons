@@ -207,7 +207,7 @@ def collect_strava_sessions(
     settings: Settings,
 ) -> list[Session]:
     sessions: list[Session] = []
-    seen: set[tuple[str, str | None]] = set()
+    seen: set[tuple] = set()
     for slot in all_strava_slot_ids(settings.strava_entity_prefix):
         session = session_from_strava_slot(
             states.get(slot.activity),
@@ -222,7 +222,16 @@ def collect_strava_sessions(
         )
         if not session:
             continue
-        key = (session.title, session.when.isoformat() if session.when else None)
+        if session.activity_id:
+            key: tuple = ("id", str(session.activity_id))
+        else:
+            key = (
+                "t",
+                session.title,
+                session.when.isoformat() if session.when else None,
+                round(session.duration_min or 0, 1),
+                round(session.distance_m or 0, 0),
+            )
         if key in seen:
             continue
         seen.add(key)

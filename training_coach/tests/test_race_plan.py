@@ -35,7 +35,10 @@ from feedback import (  # noqa: E402
     classify_compliance,
     coaching_note,
     describe_next_session,
+    format_logged_label,
+    logged_sessions,
     parse_coach_action,
+    primary_actual,
     recap_text,
     resolve_tomorrow_row,
 )
@@ -198,6 +201,68 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(classify_compliance(INTERVALS, TEMPO), "same_family")
         self.assertEqual(classify_compliance(INTERVALS, EASY_RUN), "substituted")
         self.assertEqual(classify_compliance(REST, EASY_RUN), "extra")
+        self.assertEqual(
+            classify_compliance(STRENGTH, INTERVALS, actuals=[INTERVALS, STRENGTH]),
+            "match",
+        )
+        self.assertEqual(
+            classify_compliance(REST, INTERVALS, actuals=[INTERVALS, STRENGTH]),
+            "extra",
+        )
+
+    def test_two_sessions_listed_in_recap(self):
+        day = date(2026, 9, 14)
+        sessions = [
+            Session(
+                INTERVALS,
+                "Track",
+                "Run",
+                day,
+                duration_min=42,
+                distance_m=7200,
+                activity_id="1",
+            ),
+            Session(
+                STRENGTH,
+                "Gym",
+                "WeightTraining",
+                day,
+                duration_min=50,
+                activity_id="2",
+            ),
+        ]
+        logged = logged_sessions(sessions, day)
+        self.assertEqual([s.session_type for s in logged], [INTERVALS, STRENGTH])
+        self.assertEqual(primary_actual(sessions, day), INTERVALS)
+        label = format_logged_label(logged)
+        self.assertIn("intervals", label)
+        self.assertIn("7.2 km", label)
+        self.assertIn("gym / strength", label)
+        self.assertIn("50 min", label)
+        text = recap_text(
+            "Rest day",
+            REST,
+            INTERVALS,
+            "extra",
+            ask_helpers=False,
+            tomorrow="intervals 6.6–8.4 km @ 4:58–5:18",
+            logged_label=label,
+            extras=[STRENGTH],
+            logged_count=2,
+        )
+        self.assertIn("Logged: intervals 7.2 km, gym / strength 50 min", text)
+        self.assertIn("Extra sessions on a rest day", text)
+        self.assertNotRegex(text, r"Logged: intervals \(planned")
+
+    def test_planned_session_still_matches_when_stacked(self):
+        note = coaching_note(
+            "match",
+            STRENGTH,
+            STRENGTH,
+            extras=[INTERVALS],
+            logged_count=2,
+        )
+        self.assertIn("Plus extra intervals", note)
 
     def test_parse_android_action(self):
         parsed = parse_coach_action("coach_2026-09-12_feel_great")
