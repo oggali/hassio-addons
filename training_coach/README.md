@@ -25,11 +25,12 @@ Morning lines look like `Easy run  6–10 km  @  5:50–6:30 /km` or `Intervals 
 ## How it decides
 
 1. **Recovery band** (`poor` / `ok` / `good`) from Oura (primary) and Garmin (confirm).
-2. **Sessions** from a local DuckDB warehouse of classified Strava activities + splits. HA recorder history seeds the DB once (365-day lookback).
-3. **Live prefs** (Home Assistant helpers, not add-on config): race date / distance / target time and weekly long / quality / strength / rest caps. Changing a helper does **not** restart the add-on; the coach polls and rebuilds the remaining calendar.
-4. **No race set:** same daily quota picker as before (1 long, 1 quality, 2 strength, 1 rest by default).
-5. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. Long-run km is at least **2.2× weekday easy** or **~90 min** at easy pace (not the median of sessions that barely cleared the 75-min “long” tag). A small Monte Carlo search nudges remaining days; a second Monte Carlo publishes P10 / P50 / P90 finish time.
-6. **Gates:** rest mode or poor recovery still wins over the calendar. Okay recovery uses the **low** end of the km range and downgrades quality/long.
+2. **Sport sessions** from Strava recent activities + splits, and Garmin **completed** activities (`last_activity` / `last_activities`). The same outing is not counted twice. **Oura workouts are ignored** — the ring auto-detects walks and easy movement that are not structured training.
+3. **Daily activity** (steps, active calories, intensity minutes) is fused from Oura Activity + Garmin daily totals so rest-day walking still shows up as load. This does **not** mark the day as already trained.
+4. **Live prefs** (Home Assistant helpers, not add-on config): race date / distance / target time and weekly long / quality / strength / rest caps. Changing a helper does **not** restart the add-on; the coach polls and rebuilds the remaining calendar.
+5. **No race set:** same daily quota picker as before (1 long, 1 quality, 2 strength, 1 rest by default).
+6. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. Long-run km is at least **2.2× weekday easy** or **~90 min** at easy pace (not the median of sessions that barely cleared the 75-min “long” tag). A small Monte Carlo search nudges remaining days; a second Monte Carlo publishes P10 / P50 / P90 finish time.
+7. **Gates:** rest mode or poor recovery still wins over the calendar. Okay recovery uses the **low** end of the km range and downgrades quality/long.
 
 Book training plans are **not** copied. The calendar uses public periodization rules and your data.
 
@@ -39,7 +40,7 @@ Finish-time math follows public race-prediction ideas (Riegel’s formula and a 
 
 At `evening_time` (default 20:30):
 
-- Telegram **always** recaps planned vs **all** of today’s Strava training sessions (not just the hardest one), and names tomorrow’s calendar session. If today already had quality/long and tomorrow’s calendar is another hard day, it says that morning will switch it (recovery is not known yet, so it does not pick easy vs rest).
+- Telegram **always** recaps planned vs **all** of today’s Strava/Garmin training sessions (not just the hardest one), fused day activity (Oura + Garmin steps/calories), and names tomorrow’s calendar session. If today already had quality/long and tomorrow’s calendar is another hard day, it says that morning will switch it (recovery is not known yet, so it does not pick easy vs rest).
 - If **Android is off**, Telegram names the feeling / did-plan / skip-reason helpers so you can set them in HA.
 - If **`mobile_notify_service` is set**, the phone gets the same recap **plus** action buttons (Android allows three). Taps write those helpers, then that card becomes a short **Logged:** confirmation and auto-dismisses. Telegram does **not** ask questions in that case.
 
@@ -125,9 +126,15 @@ Race goal and weekly caps are **not** in this list on purpose — changing add-o
 
 ### Sensors read (defaults)
 
-Oura: `sensor.oura_ring_readiness_score`, `sensor.oura_ring_sleep_score`, `sensor.oura_ring_average_sleep_hrv`, `sensor.oura_ring_hrv_balance_score`, `sensor.oura_ring_temperature_deviation`, `binary_sensor.oura_ring_rest_mode`
+Oura recovery: `sensor.oura_ring_readiness_score`, `sensor.oura_ring_sleep_score`, `sensor.oura_ring_average_sleep_hrv`, `sensor.oura_ring_hrv_balance_score`, `sensor.oura_ring_temperature_deviation`, `binary_sensor.oura_ring_rest_mode`
 
-Garmin: `sensor.garmin_connect_training_readiness`, `sensor.garmin_connect_morning_training_readiness`, `sensor.garmin_connect_recovery_time`, `sensor.body_battery_most_recent`, `sensor.hrv_status`, `sensor.garmin_connect_hrv_last_night_average`, `sensor.garmin_connect_hrv_baseline`
+Oura activity (not workouts): `sensor.oura_ring_activity_score`, `sensor.oura_ring_steps`, `sensor.oura_ring_active_calories`, `sensor.oura_ring_high_activity_time`, `sensor.oura_ring_medium_activity_time`
+
+Garmin recovery: `sensor.garmin_connect_training_readiness`, `sensor.garmin_connect_morning_training_readiness`, `sensor.garmin_connect_recovery_time`, `sensor.body_battery_most_recent`, `sensor.hrv_status`, `sensor.garmin_connect_hrv_last_night_average`, `sensor.garmin_connect_hrv_baseline`
+
+Garmin sport sessions: `sensor.garmin_connect_last_activity`, `sensor.garmin_connect_last_activities` (planned `last_workout` is ignored)
+
+Garmin activity: `sensor.garmin_connect_total_steps`, `sensor.garmin_connect_yesterday_steps`, `sensor.garmin_connect_active_calories`, `sensor.garmin_connect_total_intensity_minutes`
 
 Strava: `sensor.strava_oskari_vuorinen_recent_activity` and `_2` … `_10`, plus `_date`, `_distance`, `_moving_time`, `_elapsed_time`, `_average_heartrate`, `_max_heartrate`
 

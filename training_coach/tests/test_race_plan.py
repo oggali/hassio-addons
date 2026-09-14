@@ -25,7 +25,7 @@ from entities import (  # noqa: E402
     OURA_SLEEP_HRV,
     OURA_TEMP,
 )
-from features import build_snapshot  # noqa: E402
+from features import DayActivity, build_snapshot  # noqa: E402
 from feedback import (  # noqa: E402
     ACK_TIMEOUT_SECONDS,
     TAG_CHECKIN_COMP,
@@ -374,6 +374,23 @@ class FeedbackTests(unittest.TestCase):
         )
         self.assertIn("Tomorrow: gym / strength", text)
         self.assertNotIn("Easy tomorrow", text)
+
+    def test_recap_includes_fused_activity(self):
+        activity = DayActivity(
+            steps=11000,
+            oura_steps=9000,
+            garmin_steps=11000,
+            active_kcal=430,
+        )
+        text = recap_text(
+            "Rest day",
+            REST,
+            None,
+            "match",
+            ask_helpers=False,
+            activity=activity,
+        )
+        self.assertIn("Day activity: 11.0k steps, 430 kcal (Garmin + Oura).", text)
 
     def test_match_without_calendar_does_not_invent_easy(self):
         note = coaching_note("match", REST, None)

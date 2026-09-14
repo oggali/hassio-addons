@@ -223,7 +223,7 @@ def rebuild_calendar(store: CoachStore, snapshot, prefs: Prefs, feeling: str | N
     return chosen, load, paces, finish
 
 
-def publish_plan(client: HomeAssistantClient, plan: Plan) -> None:
+def publish_plan(client: HomeAssistantClient, plan: Plan, activity=None) -> None:
     attributes = {
         "friendly_name": "Training coach session",
         "icon": "mdi:run-fast" if plan.session_type != "rest" else "mdi:bed",
@@ -243,6 +243,8 @@ def publish_plan(client: HomeAssistantClient, plan: Plan) -> None:
         "upcoming": plan.upcoming,
         "phase": plan.phase,
     }
+    if activity is not None:
+        attributes["activity"] = activity.as_dict()
     client.set_state(SESSION_SENSOR, plan.session_type, attributes)
     client.set_state(
         SUMMARY_SENSOR,
@@ -462,7 +464,7 @@ def run_once(
         goal=goal,
         paces=paces,
     )
-    publish_plan(client, plan)
+    publish_plan(client, plan, snapshot.activity)
     publish_goal(client, prefs, snapshot.today, load, finish, phase)
     publish_feedback_sensor(client, store.get_feedback(snapshot.today - timedelta(days=1)))
     extra = {
@@ -473,6 +475,7 @@ def run_once(
         "prediction": {k: finish.get(k) for k in ("p10", "p50", "p90", "p_hit", "feasible")},
         "phase": phase,
         "upcoming": upcoming,
+        "activity": snapshot.activity.as_dict(),
     }
     try:
         store.upsert_recovery(
@@ -546,6 +549,7 @@ def run_evening(
         logged_label=format_logged_label(today_sessions),
         extras=extras,
         logged_count=len(today_sessions),
+        activity=snapshot.activity,
     )
     notify_message(client, settings, "Training coach evening", message, android=False, telegram=True)
     if settings.mobile_enabled:

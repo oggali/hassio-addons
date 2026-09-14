@@ -44,6 +44,8 @@ STRENGTH_SPORTS = {
     "weighttraining",
     "weightlifting",
     "strengthtraining",
+    "strength_training",
+    "fitnessequipment",
     "workout",
     "crossfit",
     "gym",
@@ -383,3 +385,131 @@ def session_from_strava_slot(
         source="strava",
         activity_id=activity_id,
     )
+
+
+def _garmin_sport(item: dict[str, Any]) -> str:
+    raw = item.get("activityType") or item.get("activity_type") or item.get("type") or ""
+    if isinstance(raw, dict):
+        return str(raw.get("typeKey") or raw.get("type_key") or raw.get("type") or "")
+    return str(raw)
+
+
+def _garmin_duration_minutes(value: Any) -> float | None:
+    """Garmin activity duration is always seconds."""
+    number = parse_float(value)
+    if number is None:
+        return None
+    return number / 60.0
+
+
+def session_from_garmin_activity(
+    item: dict[str, Any] | None,
+    tz,
+    long_run_min_minutes: int,
+) -> Session | None:
+    if not item:
+        return None
+    title = str(
+        item.get("activityName") or item.get("activity_name") or item.get("name") or ""
+    ).strip()
+    sport = _garmin_sport(item)
+    if not title and not sport:
+        return None
+    if not title or title.lower() in {"unknown", "unavailable"}:
+        title = sport or "Garmin activity"
+    activity_id = item.get("activityId") or item.get("activity_id")
+    if activity_id is not None:
+        activity_id = f"g:{activity_id}"
+    when = parse_date(
+        item.get("startTimeLocal")
+        or item.get("startTimeGMT")
+        or item.get("startTime")
+        or item.get("start_time")
+        or item.get("beginTimestamp"),
+        tz,
+    )
+    duration = _garmin_duration_minutes(
+        item.get("duration") or item.get("elapsedDuration") or item.get("movingDuration")
+    )
+    session_type = classify_sport(
+        sport,
+        title,
+        duration,
+        parse_float(item.get("averageHR") or item.get("averageHeartRate") or item.get("avgHR")),
+        parse_float(item.get("maxHR") or item.get("maxHeartRate")),
+        long_run_min_minutes,
+    )
+    return Session(
+        session_type=session_type,
+        title=title,
+        sport=sport or "Unknown",
+        when=when,
+        duration_min=duration,
+        distance_m=parse_float(item.get("distance") or item.get("distanceMeters")),
+        avg_hr=parse_float(item.get("averageHR") or item.get("averageHeartRate") or item.get("avgHR")),
+        max_hr=parse_float(item.get("maxHR") or item.get("maxHeartRate")),
+        source="garmin",
+        activity_id=activity_id,
+    )
+
+
+def session_from_garmin_entity(
+    entity: dict[str, Any] | None,
+    tz,
+    long_run_min_minutes: int,
+) -> Session | None:
+    if not entity:
+        return None
+    attrs = dict(entity.get("attributes") or {})
+    title = str(state_value(entity) or "").strip()
+    if title and title.lower() not in {"unknown", "unavailable"}:
+        attrs.setdefault("activityName", title)
+    return session_from_garmin_activity(attrs, tz, long_run_min_minutes)
+
+
+def session_family(session: Session) -> str:
+    if session.session_type in RUN_TYPES or _sport_key(session.sport) in RUN_SPORTS:
+        return "run"
+    if session.session_type == STRENGTH or _sport_key(session.sport) in STRENGTH_SPORTS:
+        return "strength"
+    if is_ski_sport(session.sport, session.title):
+        return "ski"
+    if is_bike_sport(session.sport, session.title) or session.session_type in CROSS_TYPES:
+        return "cross"
+    return session.session_type or "other"
+
+
+def sessions_look_same(left: Session, right: Session) -> bool:
+    """True when Garmin and Strava (or history) describe the same outing."""
+    if left.activity_id and right.activity_id and left.activity_id == right.activity_id:
+        return True
+    if session_day(left) != session_day(right) or session_day(left) is None:
+        return False
+    if session_family(left) != session_family(right):
+        return False
+    duration_close = (
+        left.duration_min is not None
+        and right.duration_min is not None
+        and abs(left.duration_min - right.duration_min) <= 20
+    )
+    distance_close = False
+    if left.distance_m and right.distance_m:
+        longer = max(left.distance_m, right.distance_m)
+        if longer > 0:
+            distance_close = abs(left.distance_m - right.distance_m) / longer <= 0.25
+    return duration_close or distance_close
+
+
+def merge_training_sessions(*groups: list[Session]) -> list[Session]:
+    """Keep Strava over Garmin over history stubs when they are the same session."""
+    rank = {"strava": 0, "garmin": 1, "history": 2}
+    combined: list[Session] = []
+    for group in groups:
+        combined.extend(group)
+    combined.sort(key=lambda session: (rank.get(session.source, 9), session_day(session) or date.min))
+    kept: list[Session] = []
+    for session in combined:
+        if any(sessions_look_same(session, existing) for existing in kept):
+            continue
+        kept.append(session)
+    return kept
