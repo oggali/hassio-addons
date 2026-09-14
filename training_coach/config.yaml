@@ -1,5 +1,5 @@
 name: Training Coach
-version: "2026.09.14" #calendar versioning, .x only when more than 1 patch release in same day
+version: "2026.09.14" #calendar versioning, .x only when more than 1 patch release in same day, first one yyyy.mm.dd
 slug: training_coach
 description: "Morning and evening training coach from Oura, Garmin, and Strava, with live race prefs and Telegram."
 arch:
