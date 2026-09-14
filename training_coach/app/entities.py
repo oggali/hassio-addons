@@ -11,10 +11,12 @@ OURA_SLEEP_HRV = "sensor.oura_ring_average_sleep_hrv"
 OURA_HRV_BALANCE = "sensor.oura_ring_hrv_balance_score"
 OURA_TEMP = "sensor.oura_ring_temperature_deviation"
 OURA_REST_MODE = "binary_sensor.oura_ring_rest_mode"
-OURA_LAST_WORKOUT_TYPE = "sensor.oura_ring_last_workout_type"
-OURA_LAST_WORKOUT_DURATION = "sensor.oura_ring_last_workout_duration"
-OURA_LAST_WORKOUT_INTENSITY = "sensor.oura_ring_last_workout_intensity"
-OURA_WORKOUTS_TODAY = "sensor.oura_ring_workouts_today"
+OURA_ACTIVITY_SCORE = "sensor.oura_ring_activity_score"
+OURA_STEPS = "sensor.oura_ring_steps"
+OURA_ACTIVE_CALORIES = "sensor.oura_ring_active_calories"
+OURA_TOTAL_CALORIES = "sensor.oura_ring_total_calories"
+OURA_HIGH_ACTIVITY_TIME = "sensor.oura_ring_high_activity_time"
+OURA_MEDIUM_ACTIVITY_TIME = "sensor.oura_ring_medium_activity_time"
 
 GARMIN_TRAINING_READINESS = "sensor.garmin_connect_training_readiness"
 GARMIN_MORNING_READINESS = "sensor.garmin_connect_morning_training_readiness"
@@ -23,9 +25,22 @@ GARMIN_BODY_BATTERY = "sensor.body_battery_most_recent"
 GARMIN_HRV_STATUS = "sensor.hrv_status"
 GARMIN_HRV_NIGHT = "sensor.garmin_connect_hrv_last_night_average"
 GARMIN_HRV_BASELINE = "sensor.garmin_connect_hrv_baseline"
-GARMIN_LAST_WORKOUT = "sensor.garmin_connect_last_workout"
+GARMIN_LAST_ACTIVITY = "sensor.garmin_connect_last_activity"
+GARMIN_LAST_ACTIVITIES = "sensor.garmin_connect_last_activities"
+GARMIN_LAST_ACTIVITY_FALLBACK = "sensor.last_activity"
+GARMIN_LAST_ACTIVITIES_FALLBACK = "sensor.last_activities"
+GARMIN_TOTAL_STEPS = "sensor.garmin_connect_total_steps"
+GARMIN_YESTERDAY_STEPS = "sensor.garmin_connect_yesterday_steps"
+GARMIN_ACTIVE_CALORIES = "sensor.garmin_connect_active_calories"
+GARMIN_TOTAL_CALORIES = "sensor.garmin_connect_total_calories"
+GARMIN_INTENSITY_MINUTES = "sensor.garmin_connect_total_intensity_minutes"
 GARMIN_SLEEP_SCORE = "sensor.sleep_score"
 STRAVA_LATEST_SPLITS = "sensor.strava_latest_splits"
+
+# Older Garmin entity IDs (unprefixed) still used on some installs.
+GARMIN_TOTAL_STEPS_FALLBACK = "sensor.total_steps"
+GARMIN_ACTIVE_CALORIES_FALLBACK = "sensor.active_calories"
+GARMIN_INTENSITY_MINUTES_FALLBACK = "sensor.total_intensity_minutes"
 
 SESSION_SENSOR = "sensor.training_coach_session"
 SUMMARY_SENSOR = "sensor.training_coach_summary"
@@ -105,10 +120,12 @@ def recovery_entity_ids() -> list[str]:
         OURA_HRV_BALANCE,
         OURA_TEMP,
         OURA_REST_MODE,
-        OURA_LAST_WORKOUT_TYPE,
-        OURA_LAST_WORKOUT_DURATION,
-        OURA_LAST_WORKOUT_INTENSITY,
-        OURA_WORKOUTS_TODAY,
+        OURA_ACTIVITY_SCORE,
+        OURA_STEPS,
+        OURA_ACTIVE_CALORIES,
+        OURA_TOTAL_CALORIES,
+        OURA_HIGH_ACTIVITY_TIME,
+        OURA_MEDIUM_ACTIVITY_TIME,
         GARMIN_TRAINING_READINESS,
         GARMIN_MORNING_READINESS,
         GARMIN_RECOVERY_TIME,
@@ -116,7 +133,18 @@ def recovery_entity_ids() -> list[str]:
         GARMIN_HRV_STATUS,
         GARMIN_HRV_NIGHT,
         GARMIN_HRV_BASELINE,
-        GARMIN_LAST_WORKOUT,
+        GARMIN_LAST_ACTIVITY,
+        GARMIN_LAST_ACTIVITIES,
+        GARMIN_LAST_ACTIVITY_FALLBACK,
+        GARMIN_LAST_ACTIVITIES_FALLBACK,
+        GARMIN_TOTAL_STEPS,
+        GARMIN_TOTAL_STEPS_FALLBACK,
+        GARMIN_YESTERDAY_STEPS,
+        GARMIN_ACTIVE_CALORIES,
+        GARMIN_ACTIVE_CALORIES_FALLBACK,
+        GARMIN_TOTAL_CALORIES,
+        GARMIN_INTENSITY_MINUTES,
+        GARMIN_INTENSITY_MINUTES_FALLBACK,
         GARMIN_SLEEP_SCORE,
         STRAVA_LATEST_SPLITS,
     ]

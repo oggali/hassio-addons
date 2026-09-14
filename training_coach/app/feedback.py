@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 from classify import QUALITY, REST, Session, is_training_session, session_day
 from entities import DID_PLAN_HELPER, FEELING_HELPER, SKIP_REASON_HELPER
+from features import DayActivity
 from goal import DID_PLAN_OPTIONS, FEELING_OPTIONS, SKIP_REASON_OPTIONS
 from paces import format_pace_range
 from planner import TITLES
@@ -121,6 +122,38 @@ def coaching_note(
     return "Extra session on a rest day — treat tomorrow as easier if legs feel it."
 
 
+def format_activity_line(activity: DayActivity | None) -> str | None:
+    if not activity:
+        return None
+    parts: list[str] = []
+    if activity.steps:
+        parts.append(f"{activity.steps / 1000.0:.1f}k steps")
+    elif activity.yesterday_steps:
+        parts.append(f"{activity.yesterday_steps / 1000.0:.1f}k steps yesterday")
+    if activity.active_kcal:
+        parts.append(f"{activity.active_kcal:.0f} kcal")
+    if activity.intensity_min:
+        parts.append(f"{activity.intensity_min:.0f} intensity min")
+    if not parts:
+        return None
+    sources: list[str] = []
+    if (
+        activity.garmin_steps is not None
+        or activity.garmin_active_kcal is not None
+        or activity.garmin_intensity_min is not None
+        or activity.garmin_yesterday_steps is not None
+    ):
+        sources.append("Garmin")
+    if (
+        activity.oura_steps is not None
+        or activity.oura_active_kcal is not None
+        or activity.oura_score is not None
+    ):
+        sources.append("Oura")
+    src = f" ({' + '.join(sources)})" if sources else ""
+    return f"Day activity: {', '.join(parts)}{src}."
+
+
 def recap_text(
     planned_title: str,
     planned_type: str | None,
@@ -129,6 +162,7 @@ def recap_text(
     *,
     ask_helpers: bool,
     tomorrow: str | None = None,
+    activity: DayActivity | None = None,
 ) -> str:
     actual_label = actual.replace("_", " ") if actual else "nothing logged"
     planned_label = planned_type.replace("_", " ") if planned_type else "rest"
@@ -137,6 +171,9 @@ def recap_text(
         f"Logged: {actual_label} (planned {planned_label} → {compliance}).",
         coaching_note(compliance, planned_type, actual, tomorrow=tomorrow),
     ]
+    activity_line = format_activity_line(activity)
+    if activity_line:
+        lines.append(activity_line)
     if ask_helpers:
         lines.append(
             "Please set how it felt in HA: "
