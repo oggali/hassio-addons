@@ -64,17 +64,18 @@ def at_time(now: datetime, hhmm: str) -> datetime:
 
 
 def next_named_event(now: datetime, settings: Settings) -> tuple[datetime, str]:
-    morning = at_time(now, settings.run_time)
-    evening = at_time(now, settings.evening_time)
+    slots = (
+        (settings.run_time, "morning"),
+        (settings.evening_time, "evening"),
+        (settings.share_export_time, "share_export"),
+    )
     events = []
-    if morning > now:
-        events.append((morning, "morning"))
-    else:
-        events.append((morning + timedelta(days=1), "morning"))
-    if evening > now:
-        events.append((evening, "evening"))
-    else:
-        events.append((evening + timedelta(days=1), "evening"))
+    for hhmm, kind in slots:
+        slot = at_time(now, hhmm)
+        if slot > now:
+            events.append((slot, kind))
+        else:
+            events.append((slot + timedelta(days=1), kind))
     events.sort(key=lambda item: item[0])
     return events[0]
 
@@ -103,6 +104,21 @@ def consume_daily_notify(store: CoachStore, day: date, kind: str) -> bool:
 
 def morning_slot_passed(now: datetime, settings: Settings) -> bool:
     return now >= at_time(now, settings.run_time)
+
+
+def share_export_slot_passed(now: datetime, settings: Settings) -> bool:
+    return now >= at_time(now, settings.share_export_time)
+
+
+def publish_share_db(store: CoachStore, settings: Settings) -> None:
+    """Copy the live DuckDB onto the shared folder for other apps."""
+    if not (settings.share_db_path or "").strip():
+        return
+    try:
+        store.publish_share_copy(settings.share_db_path)
+        log(f"Shared DuckDB at {settings.share_db_path}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"Share export failed: {exc}")
 
 
 def wait_for_oura(client: HomeAssistantClient, settings: Settings) -> dict:
@@ -489,6 +505,7 @@ def run_once(
         log(f"Could not persist coaching facts: {exc}")
     if notify:
         notify_plan(client, settings, plan)
+        publish_share_db(store, settings)
     log(f"Plan: {plan.session_type} ({plan.recovery_band}) — {plan.why}")
     return plan
 
@@ -699,7 +716,8 @@ def main() -> None:
     settings = Settings.from_env()
     log(
         f"timezone={settings.timezone} run_time={settings.run_time} "
-        f"evening={settings.evening_time} db={settings.db_path}"
+        f"evening={settings.evening_time} db={settings.db_path} "
+        f"share={settings.share_db_path} share_at={settings.share_export_time}"
     )
     client = HomeAssistantClient()
     store = CoachStore(settings.db_path)
@@ -803,6 +821,8 @@ def main() -> None:
             else:
                 log("Morning still ahead; publishing without notify")
             run_once(client, settings, store, manager, wait_oura=False, notify=notify)
+            if share_export_slot_passed(datetime.now(settings.tz), settings):
+                publish_share_db(store, settings)
             ran_startup = True
 
         target, kind = next_named_event(datetime.now(settings.tz), settings)
@@ -831,6 +851,9 @@ def main() -> None:
                         run_evening(client, settings, store, manager)
                     else:
                         log("Skipping duplicate evening notify")
+                    time.sleep(60)
+                elif kind == "share_export":
+                    publish_share_db(store, settings)
                     time.sleep(60)
             continue
 

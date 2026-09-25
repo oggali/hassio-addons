@@ -12,6 +12,7 @@ stdin: true
 homeassistant_api: true
 map:
   - addon_config:rw
+  - share:rw
 options:
   timezone: "Europe/Helsinki"
   run_time: "07:30"

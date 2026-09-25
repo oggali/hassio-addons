@@ -34,6 +34,8 @@ class Settings:
     strava_entity_prefix: str = "sensor.strava_oskari_vuorinen"
     long_run_min_minutes: int = 75
     db_path: str = "/data/coach.duckdb"
+    share_db_path: str = "/share/training_coach/coach.duckdb"
+    share_export_time: str = "23:00"
     history_seed_days: int = 365
 
     @property
@@ -71,6 +73,8 @@ class Settings:
             ),
             long_run_min_minutes=_env_int("LONG_RUN_MIN_MINUTES", 75),
             db_path=os.environ.get("DB_PATH", "/data/coach.duckdb"),
+            share_db_path=os.environ.get("SHARE_DB_PATH", "/share/training_coach/coach.duckdb"),
+            share_export_time=os.environ.get("SHARE_EXPORT_TIME", "23:00"),
             history_seed_days=_env_int("HISTORY_SEED_DAYS", 365),
         )
 

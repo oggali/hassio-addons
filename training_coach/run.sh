@@ -12,6 +12,8 @@ export RUN_IMMEDIATELY="$(bashio::config 'run_immediately_on_start')"
 export STRAVA_ENTITY_PREFIX="$(bashio::config 'strava_entity_prefix')"
 export LONG_RUN_MIN_MINUTES="$(bashio::config 'long_run_min_minutes')"
 export DB_PATH="${DB_PATH:-/data/coach.duckdb}"
+export SHARE_DB_PATH="${SHARE_DB_PATH:-/share/training_coach/coach.duckdb}"
+export SHARE_EXPORT_TIME="${SHARE_EXPORT_TIME:-23:00}"
 export HISTORY_SEED_DAYS="${HISTORY_SEED_DAYS:-365}"
 
 bashio::log.info "Training Coach starting"

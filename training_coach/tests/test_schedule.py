@@ -63,6 +63,17 @@ class ScheduleTests(unittest.TestCase):
         target = at(20, 30)
         self.assertTrue(should_fire_named_event(at(20, 30), target, "evening", last))
 
+    def test_share_export_is_after_evening(self) -> None:
+        now = at(21, 0)
+        target, kind = next_named_event(now, SETTINGS)
+        self.assertEqual(kind, "share_export")
+        self.assertEqual(target, at(23, 0))
+
+    def test_after_share_export_next_is_tomorrow_morning(self) -> None:
+        target, kind = next_named_event(at(23, 1), SETTINGS)
+        self.assertEqual(kind, "morning")
+        self.assertEqual(target, at(7, 30) + timedelta(days=1))
+
     def test_startup_notifies_only_after_morning_slot(self) -> None:
         self.assertFalse(morning_slot_passed(at(7, 0), SETTINGS))
         self.assertTrue(morning_slot_passed(at(7, 30), SETTINGS))
