@@ -78,7 +78,9 @@ input: '{"cmd":"checkin","feeling":"tired","did_plan":"skipped","skip_reason":"s
 
 ## Local DuckDB store
 
-Path: `/data/coach.duckdb` (kept forever; no auto-prune).
+Live path: `/data/coach.duckdb` (kept forever; no auto-prune). That file stays inside this app and is locked while it runs.
+
+A full copy in the same DuckDB format is written to `/share/training_coach/coach.duckdb` after the morning notification and again at 23:00 (after that, nothing new is written until the next morning). Other apps that map `share` can open that copy read-only. Home Assistant sees it at the same `/share/training_coach/coach.duckdb` path.
 
 | Table | What |
 |---|---|

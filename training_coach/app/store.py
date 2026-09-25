@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -631,6 +632,39 @@ class CoachStore:
                 [since],
             ).fetchall()
         return [row[0] for row in rows if row and row[0]]
+
+    def publish_share_copy(self, dest: str | Path) -> None:
+        """Write a full DuckDB copy of the live database to dest.
+
+        The copy is a normal .duckdb file. Readers can open it while this
+        process keeps the live file locked.
+        """
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f".{dest.name}.tmp")
+        self._unlink_duckdb(tmp)
+        source = self._conn.execute("SELECT current_database()").fetchone()[0]
+        source_sql = '"' + str(source).replace('"', '""') + '"'
+        path_sql = str(tmp).replace("'", "''")
+        self._conn.execute("CHECKPOINT")
+        self._conn.execute(f"ATTACH '{path_sql}' AS share_export")
+        try:
+            self._conn.execute(f"COPY FROM DATABASE {source_sql} TO share_export")
+            self._conn.execute("CHECKPOINT share_export")
+        finally:
+            self._conn.execute("DETACH share_export")
+        os.replace(tmp, dest)
+        self._unlink_duckdb(tmp)
+        stale_wal = Path(str(dest) + ".wal")
+        if stale_wal.exists():
+            stale_wal.unlink()
+
+    @staticmethod
+    def _unlink_duckdb(path: Path) -> None:
+        for suffix in ("", ".wal"):
+            target = Path(str(path) + suffix)
+            if target.exists():
+                target.unlink()
 
     def wipe(self) -> None:
         """Delete the database file and reopen an empty schema."""

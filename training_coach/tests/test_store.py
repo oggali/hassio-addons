@@ -8,6 +8,8 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+import duckdb
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
@@ -132,6 +134,27 @@ class StoreTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(rec[0], "good")
         self.assertEqual(rec[1], 82)
+
+    def test_publish_share_copy_matches_live_rows(self) -> None:
+        self.store.upsert_sessions(
+            [Session(EASY_RUN, "Easy", "Run", date(2026, 9, 12), activity_id="42", source="strava")]
+        )
+        self.store.set_meta("schema_version", "2")
+        dest = Path(self.tmp.name) / "nested" / "coach.duckdb"
+        self.store.publish_share_copy(dest)
+        copy = duckdb.connect(str(dest), read_only=True)
+        titles = [row[0] for row in copy.execute("SELECT title FROM sessions ORDER BY title").fetchall()]
+        self.assertEqual(titles, ["Easy"])
+        self.assertEqual(copy.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0], "2")
+        copy.close()
+        self.store.upsert_sessions(
+            [Session(EASY_RUN, "Later", "Run", date(2026, 9, 13), activity_id="43", source="strava")]
+        )
+        self.store.publish_share_copy(dest)
+        fresh = duckdb.connect(str(dest), read_only=True)
+        self.addCleanup(fresh.close)
+        titles = [row[0] for row in fresh.execute("SELECT title FROM sessions ORDER BY title").fetchall()]
+        self.assertEqual(titles, ["Easy", "Later"])
 
 
 if __name__ == "__main__":
