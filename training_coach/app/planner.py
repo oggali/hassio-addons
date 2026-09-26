@@ -1,7 +1,8 @@
 """Pick today's session from recovery, weekly load, and optional race calendar.
 
 Recovery always wins over the periodized calendar. HARD_SPACING_HOURS is the
-main knob for stacking quality/long; weekly caps live in HA helpers, not here.
+main knob for stacking quality/long/cross_hard; cross_easy and cross_easy_long
+do not consume that spacing. Weekly caps live in HA helpers, not here.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from datetime import date, timedelta
 
 from classify import (
     CROSS_EASY,
+    CROSS_EASY_LONG,
     CROSS_HARD,
     CROSS_LONG,
     CROSS_TYPES,
@@ -49,6 +51,7 @@ TITLES = {
     CROSS_EASY: "Easy ride / ski",
     CROSS_HARD: "Hard ride / ski",
     CROSS_LONG: "Long ride / ski",
+    CROSS_EASY_LONG: "Long easy ride / ski",
 }
 
 

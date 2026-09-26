@@ -17,11 +17,38 @@ from parse import coerce_date
 from planner import Plan
 from settings import Settings
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "4"
 
 
 def _as_date(value: Any) -> date | None:
     return coerce_date(value)
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, date):
+        dt = datetime(value.year, value.month, value.day)
+    else:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _utc_naive(value: datetime | None) -> datetime | None:
+    """DuckDB TIMESTAMP is timezone-agnostic; persist UTC wall clock."""
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 _SCHEMA_SQL = """
@@ -37,6 +64,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     title VARCHAR NOT NULL,
     sport VARCHAR NOT NULL,
     when_day DATE,
+    started_at TIMESTAMP,
     duration_min DOUBLE,
     distance_m DOUBLE,
     avg_hr DOUBLE,
@@ -121,6 +149,7 @@ CREATE TABLE IF NOT EXISTS feedback_history (
     compliance VARCHAR,
     feeling VARCHAR,
     skip_reason VARCHAR,
+    effort_fit VARCHAR,
     recovery_band VARCHAR,
     source VARCHAR,
     notes VARCHAR,
@@ -154,6 +183,18 @@ class CoachStore:
 
     def migrate(self) -> None:
         self._conn.execute(_SCHEMA_SQL)
+        session_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info('sessions')").fetchall()
+        }
+        if "started_at" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN started_at TIMESTAMP")
+        feedback_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info('feedback_history')").fetchall()
+        }
+        if "effort_fit" not in feedback_cols:
+            self._conn.execute("ALTER TABLE feedback_history ADD COLUMN effort_fit VARCHAR")
         self._conn.execute(
             "INSERT OR REPLACE INTO meta VALUES (?, ?)",
             ["schema_version", SCHEMA_VERSION],
@@ -197,8 +238,9 @@ class CoachStore:
                 """
                 INSERT OR REPLACE INTO sessions (
                     session_key, activity_id, session_type, title, sport, when_day,
-                    duration_min, distance_m, avg_hr, max_hr, source, splits_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    started_at, duration_min, distance_m, avg_hr, max_hr, source,
+                    splits_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     key,
@@ -207,6 +249,7 @@ class CoachStore:
                     session.title,
                     session.sport,
                     session.when,
+                    _utc_naive(session.started_at),
                     session.duration_min,
                     session.distance_m,
                     session.avg_hr,
@@ -223,41 +266,43 @@ class CoachStore:
         if since is None:
             rows = self._conn.execute(
                 """
-                SELECT activity_id, session_type, title, sport, when_day,
+                SELECT activity_id, session_type, title, sport, when_day, started_at,
                        duration_min, distance_m, avg_hr, max_hr, source, splits_json
                 FROM sessions
-                ORDER BY when_day DESC NULLS LAST
+                ORDER BY when_day DESC NULLS LAST, started_at DESC NULLS LAST
                 """
             ).fetchall()
         else:
             rows = self._conn.execute(
                 """
-                SELECT activity_id, session_type, title, sport, when_day,
+                SELECT activity_id, session_type, title, sport, when_day, started_at,
                        duration_min, distance_m, avg_hr, max_hr, source, splits_json
                 FROM sessions
                 WHERE when_day IS NULL OR when_day >= ?
-                ORDER BY when_day DESC NULLS LAST
+                ORDER BY when_day DESC NULLS LAST, started_at DESC NULLS LAST
                 """,
                 [since],
             ).fetchall()
         out: list[Session] = []
         for row in rows:
             splits = None
-            if row[10]:
-                splits = json.loads(row[10])
+            if row[11]:
+                splits = json.loads(row[11])
+            started_at = _as_datetime(row[5])
             out.append(
                 Session(
                     activity_id=row[0],
                     session_type=row[1],
                     title=row[2],
                     sport=row[3],
-                    when=_as_date(row[4]),
-                    duration_min=row[5],
-                    distance_m=row[6],
-                    avg_hr=row[7],
-                    max_hr=row[8],
-                    source=row[9],
+                    when=_as_date(row[4]) or (started_at.date() if started_at else None),
+                    duration_min=row[6],
+                    distance_m=row[7],
+                    avg_hr=row[8],
+                    max_hr=row[9],
+                    source=row[10],
                     splits=splits,
+                    started_at=started_at,
                 )
             )
         return out
@@ -524,6 +569,7 @@ class CoachStore:
         compliance: str | None = None,
         feeling: str | None = None,
         skip_reason: str | None = None,
+        effort_fit: str | None = None,
         recovery_band: str | None = None,
         source: str = "system",
         notes: str | None = None,
@@ -535,6 +581,7 @@ class CoachStore:
             "compliance": compliance if compliance is not None else existing.get("compliance"),
             "feeling": feeling if feeling is not None else existing.get("feeling"),
             "skip_reason": skip_reason if skip_reason is not None else existing.get("skip_reason"),
+            "effort_fit": effort_fit if effort_fit is not None else existing.get("effort_fit"),
             "recovery_band": recovery_band
             if recovery_band is not None
             else existing.get("recovery_band"),
@@ -545,8 +592,8 @@ class CoachStore:
             """
             INSERT OR REPLACE INTO feedback_history (
                 day, planned_type, actual_type, compliance, feeling, skip_reason,
-                recovery_band, source, notes, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                effort_fit, recovery_band, source, notes, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 day,
@@ -555,6 +602,7 @@ class CoachStore:
                 payload["compliance"],
                 payload["feeling"],
                 payload["skip_reason"],
+                payload["effort_fit"],
                 payload["recovery_band"],
                 payload["source"],
                 payload["notes"],
@@ -568,7 +616,7 @@ class CoachStore:
         row = self._conn.execute(
             """
             SELECT planned_type, actual_type, compliance, feeling, skip_reason,
-                   recovery_band, source, notes
+                   effort_fit, recovery_band, source, notes
             FROM feedback_history WHERE day = ?
             """,
             [day],
@@ -582,9 +630,10 @@ class CoachStore:
             "compliance": row[2],
             "feeling": row[3],
             "skip_reason": row[4],
-            "recovery_band": row[5],
-            "source": row[6],
-            "notes": row[7],
+            "effort_fit": row[5],
+            "recovery_band": row[6],
+            "source": row[7],
+            "notes": row[8],
         }
 
     def load_feedback(self, since: date | None = None) -> list[dict[str, Any]]:
@@ -592,7 +641,7 @@ class CoachStore:
             rows = self._conn.execute(
                 """
                 SELECT day, planned_type, actual_type, compliance, feeling, skip_reason,
-                       recovery_band, source, notes
+                       effort_fit, recovery_band, source, notes
                 FROM feedback_history
                 ORDER BY day
                 """
@@ -601,7 +650,7 @@ class CoachStore:
             rows = self._conn.execute(
                 """
                 SELECT day, planned_type, actual_type, compliance, feeling, skip_reason,
-                       recovery_band, source, notes
+                       effort_fit, recovery_band, source, notes
                 FROM feedback_history
                 WHERE day >= ?
                 ORDER BY day
@@ -616,9 +665,10 @@ class CoachStore:
                 "compliance": row[3],
                 "feeling": row[4],
                 "skip_reason": row[5],
-                "recovery_band": row[6],
-                "source": row[7],
-                "notes": row[8],
+                "effort_fit": row[6],
+                "recovery_band": row[7],
+                "source": row[8],
+                "notes": row[9],
             }
             for row in rows
         ]

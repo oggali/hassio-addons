@@ -7,6 +7,7 @@ from typing import Any
 
 from entities import (
     DID_PLAN_HELPER,
+    EFFORT_FIT_HELPER,
     FEELING_HELPER,
     RACE_DATE_HELPER,
     RACE_DISTANCE_HELPER,
@@ -19,6 +20,7 @@ from entities import (
 )
 from goal import (
     DID_PLAN_OPTIONS,
+    EFFORT_FIT_OPTIONS,
     FEELING_OPTIONS,
     RACE_DISTANCES,
     SKIP_REASON_OPTIONS,
@@ -72,6 +74,7 @@ def read_feedback_helpers(states: dict[str, dict[str, Any]]) -> dict[str, str]:
         "feeling": option(FEELING_HELPER, FEELING_OPTIONS),
         "did_plan": option(DID_PLAN_HELPER, DID_PLAN_OPTIONS),
         "skip_reason": option(SKIP_REASON_HELPER, SKIP_REASON_OPTIONS),
+        "effort_fit": option(EFFORT_FIT_HELPER, EFFORT_FIT_OPTIONS),
     }
 
 
@@ -191,6 +194,16 @@ HELPER_CREATE_SPECS: list[tuple[str, str, dict[str, Any]]] = [
             "icon": "mdi:help-circle-outline",
         },
     ),
+    (
+        "input_select",
+        EFFORT_FIT_HELPER,
+        {
+            "name": "Training coach effort fit",
+            "options": list(EFFORT_FIT_OPTIONS),
+            "initial": "unset",
+            "icon": "mdi:gauge",
+        },
+    ),
 ]
 
 
@@ -245,6 +258,7 @@ class PrefsManager:
             FEELING_HELPER,
             DID_PLAN_HELPER,
             SKIP_REASON_HELPER,
+            EFFORT_FIT_HELPER,
         ]
         return self.client.get_states(ids)
 
@@ -344,5 +358,10 @@ class PrefsManager:
             _log(f"Could not set {entity_id}={option}: {exc}")
 
     def reset_feedback_helpers(self) -> None:
-        for entity_id in (FEELING_HELPER, DID_PLAN_HELPER, SKIP_REASON_HELPER):
+        for entity_id in (
+            FEELING_HELPER,
+            DID_PLAN_HELPER,
+            SKIP_REASON_HELPER,
+            EFFORT_FIT_HELPER,
+        ):
             self.set_select(entity_id, "unset")

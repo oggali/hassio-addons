@@ -57,6 +57,7 @@ WEEKLY_REST_HELPER = "input_number.training_coach_weekly_rest_days"
 FEELING_HELPER = "input_select.training_coach_feeling"
 DID_PLAN_HELPER = "input_select.training_coach_did_plan"
 SKIP_REASON_HELPER = "input_select.training_coach_skip_reason"
+EFFORT_FIT_HELPER = "input_select.training_coach_effort_fit"
 
 PREF_HELPER_IDS = (
     RACE_DATE_HELPER,
@@ -71,6 +72,7 @@ FEEDBACK_HELPER_IDS = (
     FEELING_HELPER,
     DID_PLAN_HELPER,
     SKIP_REASON_HELPER,
+    EFFORT_FIT_HELPER,
 )
 
 STRAVA_RECENT_COUNT = 10

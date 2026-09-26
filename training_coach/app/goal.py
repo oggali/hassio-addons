@@ -24,6 +24,7 @@ RACE_KM = {
 FEELING_OPTIONS = ("unset", "great", "ok", "tired", "wiped")
 DID_PLAN_OPTIONS = ("unset", "yes", "modified", "skipped")
 SKIP_REASON_OPTIONS = ("unset", "no_time", "tired", "sore", "weather", "other_sport")
+EFFORT_FIT_OPTIONS = ("unset", "too_easy", "about_right", "too_hard")
 
 
 @dataclass(frozen=True)

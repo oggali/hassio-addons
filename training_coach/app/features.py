@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from classify import (
+    HARD_OR_LONG,
     Session,
     is_training_session,
     merge_training_sessions,
@@ -481,7 +482,14 @@ def build_snapshot(
     else:
         sessions = merge_training_sessions(sessions)
     already = already_trained_on(sessions, today)
-    sessions = sorted(sessions, key=lambda s: s.when or date.min, reverse=True)
+    sessions = sorted(
+        sessions,
+        key=lambda s: (
+            session_day(s) or date.min,
+            s.started_at.timestamp() if s.started_at else 0.0,
+        ),
+        reverse=True,
+    )
     return FeatureSnapshot(
         now=now,
         today=today,
@@ -503,8 +511,19 @@ def sessions_since(snapshot: FeatureSnapshot, start: date) -> list[Session]:
 
 
 def yesterday_session(snapshot: FeatureSnapshot) -> Session | None:
+    """Most taxing training session from yesterday (hard/long over easy/gym)."""
     target = snapshot.today - timedelta(days=1)
-    for session in snapshot.sessions:
-        if session_day(session) == target and is_training_session(session):
-            return session
-    return None
+    candidates = [
+        s
+        for s in snapshot.sessions
+        if session_day(s) == target and is_training_session(s)
+    ]
+    if not candidates:
+        return None
+
+    def rank(session: Session) -> tuple:
+        hard = 0 if session.session_type in HARD_OR_LONG else 1
+        start = session.started_at.timestamp() if session.started_at else 0.0
+        return (hard, -(session.duration_min or 0), -start)
+
+    return sorted(candidates, key=rank)[0]
