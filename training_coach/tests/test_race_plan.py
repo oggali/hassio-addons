@@ -29,6 +29,7 @@ from features import DayActivity, build_snapshot  # noqa: E402
 from feedback import (  # noqa: E402
     ACK_TIMEOUT_SECONDS,
     TAG_CHECKIN_COMP,
+    TAG_CHECKIN_EFFORT,
     TAG_CHECKIN_FEEL,
     TAG_CHECKIN_SKIP,
     android_followups,
@@ -302,6 +303,9 @@ class FeedbackTests(unittest.TestCase):
         other = parse_coach_action("coach_2026-09-12_skip_other", "weather was bad")
         self.assertEqual(other["option"], "other_sport")
         self.assertEqual(other["notes"], "weather was bad")
+        effort = parse_coach_action("coach_2026-09-12_effort_too_easy")
+        self.assertEqual(effort["option"], "too_easy")
+        self.assertEqual(effort["field"], "effort_fit")
 
     def test_feeling_tap_replaces_card_with_timed_ack(self):
         parsed = parse_coach_action("coach_2026-09-12_feel_ok")
@@ -314,6 +318,33 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(data["timeout"], ACK_TIMEOUT_SECONDS)
         self.assertFalse(data["sticky"])
         self.assertNotIn("actions", data)
+
+    def test_did_it_asks_effort_fit(self):
+        parsed = parse_coach_action("coach_2026-09-12_comp_did")
+        day = date(2026, 9, 12)
+        followups = android_followups(parsed, day)
+        self.assertEqual(followups[0]["message"], "clear_notification")
+        self.assertEqual(followups[0]["android_data"], {"tag": TAG_CHECKIN_COMP})
+        self.assertIn("too easy", followups[1]["message"].lower())
+        effort = followups[1]["android_data"]
+        self.assertEqual(effort["tag"], TAG_CHECKIN_EFFORT)
+        self.assertTrue(effort["sticky"])
+        titles = [a["title"] for a in effort["actions"]]
+        self.assertEqual(titles, ["Too easy", "Right", "Too hard"])
+
+    def test_feeling_after_match_asks_effort_fit(self):
+        parsed = parse_coach_action("coach_2026-09-12_feel_great")
+        day = date(2026, 9, 12)
+        followups = android_followups(parsed, day, compliance="match")
+        self.assertEqual(followups[0]["message"], "clear_notification")
+        self.assertEqual(followups[0]["android_data"], {"tag": TAG_CHECKIN_FEEL})
+        self.assertEqual(followups[1]["android_data"]["tag"], TAG_CHECKIN_EFFORT)
+
+    def test_effort_tap_acks(self):
+        parsed = parse_coach_action("coach_2026-09-12_effort_about_right")
+        followups = android_followups(parsed, date(2026, 9, 12))
+        self.assertEqual(followups[0]["message"], "Logged: About right")
+        self.assertEqual(followups[0]["android_data"]["tag"], TAG_CHECKIN_EFFORT)
 
     def test_skipped_clears_comp_and_asks_reason(self):
         parsed = parse_coach_action("coach_2026-09-12_comp_skipped")
@@ -360,8 +391,11 @@ class FeedbackTests(unittest.TestCase):
     def test_telegram_helper_prompt_when_no_android(self):
         text = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=True)
         self.assertIn("input_select.training_coach_feeling", text)
+        self.assertNotIn("input_select.training_coach_effort_fit", text)
         silent = recap_text("Easy run", EASY_RUN, None, "skipped", ask_helpers=False)
         self.assertNotIn("input_select.training_coach_feeling", silent)
+        matched = recap_text("Easy run", EASY_RUN, EASY_RUN, "match", ask_helpers=True)
+        self.assertIn("input_select.training_coach_effort_fit", matched)
 
     def test_match_names_calendar_tomorrow(self):
         text = recap_text(

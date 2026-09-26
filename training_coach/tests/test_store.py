@@ -32,6 +32,9 @@ class StoreTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_upsert_and_load_sessions(self) -> None:
+        from datetime import datetime, timezone
+
+        started = datetime(2026, 9, 10, 7, 5, tzinfo=timezone.utc)
         sessions = [
             Session(
                 session_type=INTERVALS,
@@ -43,6 +46,7 @@ class StoreTests(unittest.TestCase):
                 activity_id="111",
                 splits=[{"distance_m": 1000, "pace_min_km": 4.0}],
                 source="strava",
+                started_at=started,
             ),
             Session(
                 session_type=STRENGTH,
@@ -60,6 +64,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(by_title["Track intervals"].session_type, INTERVALS)
         self.assertEqual(by_title["Track intervals"].activity_id, "111")
         self.assertEqual(by_title["Track intervals"].splits[0]["pace_min_km"], 4.0)
+        self.assertEqual(by_title["Track intervals"].started_at, started)
         self.assertEqual(session_key(by_title["Gym"]), "title:Gym|2026-09-09")
 
     def test_load_sessions_since(self) -> None:

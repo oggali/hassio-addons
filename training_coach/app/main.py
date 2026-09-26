@@ -438,6 +438,9 @@ def capture_feedback_helpers(store: CoachStore, manager: PrefsManager, day: date
         skip_reason=values["skip_reason"]
         if values["skip_reason"] != "unset"
         else existing.get("skip_reason"),
+        effort_fit=values["effort_fit"]
+        if values["effort_fit"] != "unset"
+        else existing.get("effort_fit"),
         source="helper",
     )
 
@@ -599,6 +602,7 @@ def apply_checkin(store: CoachStore, manager: PrefsManager, payload: dict, today
         day,
         feeling=payload.get("feeling"),
         skip_reason=payload.get("skip_reason"),
+        effort_fit=payload.get("effort_fit"),
         compliance=(
             "skipped"
             if payload.get("did_plan") == "skipped"
@@ -615,6 +619,8 @@ def apply_checkin(store: CoachStore, manager: PrefsManager, payload: dict, today
         manager.set_select("input_select.training_coach_did_plan", payload["did_plan"])
     if payload.get("skip_reason"):
         manager.set_select("input_select.training_coach_skip_reason", payload["skip_reason"])
+    if payload.get("effort_fit"):
+        manager.set_select("input_select.training_coach_effort_fit", payload["effort_fit"])
 
 
 def stdin_loop(
@@ -697,9 +703,12 @@ def handle_mobile_action(
         fields["skip_reason"] = parsed["option"]
         if parsed.get("notes"):
             fields["notes"] = parsed["notes"]
+    elif parsed.get("field") == "effort_fit":
+        fields["effort_fit"] = parsed["option"]
     store.upsert_feedback(day, **fields)
-    publish_feedback_sensor(client, store.get_feedback(day))
-    for item in android_followups(parsed, day):
+    row = store.get_feedback(day) or {}
+    publish_feedback_sensor(client, row)
+    for item in android_followups(parsed, day, compliance=row.get("compliance")):
         notify_message(
             client,
             settings,

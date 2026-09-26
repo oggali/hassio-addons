@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from classify import (  # noqa: E402
     CROSS_EASY,
+    CROSS_EASY_LONG,
     CROSS_HARD,
     CROSS_LONG,
     EASY_RUN,
@@ -166,7 +167,9 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(classify_sport("Ride", "Easy commute", 35, 118, 140, 75), CROSS_EASY)
         self.assertEqual(classify_sport("Ride", "Zwift intervals", 50, 155, 178, 75), CROSS_HARD)
         self.assertEqual(classify_sport("VirtualRide", "Morning Ride", 45, 160, 180, 75), CROSS_HARD)
-        self.assertEqual(classify_sport("Ride", "Sunday ride", 130, 128, 155, 75), CROSS_LONG)
+        self.assertEqual(classify_sport("Ride", "Sunday ride", 130, 128, 155, 75), CROSS_EASY_LONG)
+        # Short commute: elevated max HR must not alone make it hard.
+        self.assertEqual(classify_sport("Ride", "Morning Ride", 26, 141, 170, 75), CROSS_EASY)
 
     def test_hard_bike_load_exceeds_easy(self):
         easy = Session(CROSS_EASY, "commute", "Ride", SATURDAY.date(), duration_min=60)
@@ -184,7 +187,7 @@ class ClassifyTests(unittest.TestCase):
             classify_sport("RollerSki", "Skate VO2", 40, 160, 178, 75), CROSS_HARD
         )
         self.assertEqual(
-            classify_sport("NordicSki", "Sunday skate", 90, 132, 160, 75), CROSS_LONG
+            classify_sport("NordicSki", "Sunday skate", 90, 132, 160, 75), CROSS_EASY_LONG
         )
         self.assertEqual(classify_sport("AlpineSki", "Downhill day", 180, 110, 140, 75), OTHER)
 
@@ -312,6 +315,30 @@ class PlannerTests(unittest.TestCase):
         today = [s for s in snap.sessions if s.when == SATURDAY.date()]
         self.assertEqual(sorted(s.session_type for s in today), [INTERVALS, STRENGTH])
 
+    def test_morning_and_afternoon_rides_are_both_kept(self):
+        """Similar commute doubles must not collapse — start times differ."""
+        states = good_recovery()
+        morning = SATURDAY.replace(hour=8, minute=5)
+        afternoon = SATURDAY.replace(hour=17, minute=20)
+        add_strava(
+            states, 0, "Morning Ride", "Ride", morning, 26,
+            avg_hr=145, max_hr=160, activity_id=101, distance_m=11.0,
+        )
+        add_strava(
+            states, 1, "Afternoon Ride", "Ride", afternoon, 31,
+            avg_hr=148, max_hr=162, activity_id=102, distance_m=12.0,
+        )
+        snap = build_snapshot(states, self.settings, now=SATURDAY)
+        today = [
+            s
+            for s in snap.sessions
+            if session_day(s) == SATURDAY.date() and is_training_session(s)
+        ]
+        self.assertEqual(len(today), 2)
+        self.assertTrue(all(s.started_at is not None for s in today))
+        titles = sorted(s.title for s in today)
+        self.assertEqual(titles, ["Afternoon Ride", "Morning Ride"])
+
     def test_oura_walk_is_not_already_trained(self):
         states = poor_recovery()
         states["sensor.oura_ring_workouts_today"] = entity(
@@ -389,8 +416,12 @@ class PlannerTests(unittest.TestCase):
 
     def test_garmin_duplicates_strava_same_run(self):
         states = good_recovery()
-        add_strava(states, 0, "Easy run", "Run", SATURDAY, 40)
-        add_garmin(states, "Lunch run", "running", SATURDAY, 42, activity_id=7, distance_m=7200)
+        start = SATURDAY.replace(hour=12, minute=10)
+        add_strava(states, 0, "Easy run", "Run", start, 40, distance_m=7.2)
+        add_garmin(
+            states, "Lunch run", "running", start + timedelta(minutes=2), 42,
+            activity_id=7, distance_m=7200,
+        )
         snap = build_snapshot(states, self.settings, now=SATURDAY)
         today = [
             s
@@ -453,7 +484,8 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(plan.yesterday, CROSS_HARD)
         self.assertNotIn(plan.session_type, {INTERVALS, TEMPO, LONG_RUN})
 
-    def test_long_bike_yesterday_needs_recovery(self):
+    def test_long_easy_bike_yesterday_does_not_block_like_long_run(self):
+        """Long Z2 bike raises load but should not force rest like a long run."""
         states = good_recovery()
         states[OURA_READINESS] = entity(68, SATURDAY)
         states[OURA_SLEEP] = entity(66, SATURDAY)
@@ -470,8 +502,9 @@ class PlannerTests(unittest.TestCase):
             max_hr=155,
         )
         plan = self.plan(states, SATURDAY)
-        self.assertEqual(plan.yesterday, CROSS_LONG)
-        self.assertEqual(plan.session_type, REST)
+        self.assertEqual(plan.yesterday, CROSS_EASY_LONG)
+        self.assertNotEqual(plan.session_type, REST)
+        self.assertNotIn(plan.session_type, {INTERVALS, TEMPO, LONG_RUN})
 
     def test_hard_ski_yesterday_blocks_quality(self):
         states = good_recovery()

@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
-from parse import coerce_date, parse_date, parse_duration_minutes, parse_float, state_value
+from parse import (
+    coerce_date,
+    parse_date,
+    parse_datetime,
+    parse_duration_minutes,
+    parse_float,
+    state_value,
+)
+
+# Same outing on Garmin + Strava usually starts within a few minutes.
+# Wider than that → separate sessions (e.g. morning + afternoon commute).
+SAME_OUTING_START_WINDOW = timedelta(minutes=45)
 
 REST = "rest"
 EASY_RUN = "easy_run"
@@ -17,6 +28,8 @@ STRENGTH = "strength"
 CROSS_EASY = "cross_easy"
 CROSS_HARD = "cross_hard"
 CROSS_LONG = "cross_long"
+# Long easy bike/ski: counts toward load, does NOT block next day like a long run.
+CROSS_EASY_LONG = "cross_easy_long"
 OTHER = "other"
 
 SESSION_TYPES = (
@@ -29,9 +42,12 @@ SESSION_TYPES = (
     CROSS_EASY,
     CROSS_HARD,
     CROSS_LONG,
+    CROSS_EASY_LONG,
 )
 QUALITY = {INTERVALS, TEMPO}
-CROSS_TYPES = {CROSS_EASY, CROSS_HARD, CROSS_LONG}
+CROSS_TYPES = {CROSS_EASY, CROSS_HARD, CROSS_LONG, CROSS_EASY_LONG}
+# cross_easy_long intentionally omitted — long Z2 bike/ski is fatigue, not a long-run gate.
+# cross_long stays for legacy history rows only (new classify paths emit cross_easy_long).
 HARD_OR_LONG = {INTERVALS, TEMPO, LONG_RUN, CROSS_HARD, CROSS_LONG}
 RUN_TYPES = {EASY_RUN, LONG_RUN, INTERVALS, TEMPO}
 TRAINING_TYPES = RUN_TYPES | CROSS_TYPES | {STRENGTH}
@@ -152,7 +168,28 @@ def is_training_session(session: Session) -> bool:
 
 
 def session_day(session: Session) -> date | None:
+    if session.started_at is not None:
+        return coerce_date(session.started_at)
     return coerce_date(session.when)
+
+
+def _has_clock_time(value: datetime | None) -> bool:
+    """True when started_at carries a real time of day (not date-only midnight)."""
+    if value is None:
+        return False
+    return not (value.hour == 0 and value.minute == 0 and value.second == 0 and value.microsecond == 0)
+
+
+def strava_distance_metres(value: float | None) -> float | None:
+    """Strava HA distance sensors are usually km; Garmin is metres."""
+    if value is None:
+        return None
+    if value <= 0:
+        return value
+    # Already looks like metres (track/road distances).
+    if value >= 1000:
+        return value
+    return value * 1000.0
 
 
 @dataclass
@@ -168,6 +205,9 @@ class Session:
     source: str = "strava"
     activity_id: str | None = None
     splits: list | None = None
+    # Wall-clock start when the sensor provides it (used to collapse Garmin/Strava
+    # of the same outing without merging morning + afternoon doubles).
+    started_at: datetime | None = None
 
 
 def _norm(value: Any) -> str:
@@ -209,7 +249,12 @@ def cross_long_minutes(sport: str, title: str, long_run_min_minutes: int) -> int
 
 
 def cross_label(session_type: str, sport: str = "", title: str = "") -> str:
-    kind = {CROSS_EASY: "Easy", CROSS_HARD: "Hard", CROSS_LONG: "Long"}.get(session_type)
+    kind = {
+        CROSS_EASY: "Easy",
+        CROSS_HARD: "Hard",
+        CROSS_LONG: "Long",
+        CROSS_EASY_LONG: "Long easy",
+    }.get(session_type)
     if not kind:
         return session_type.replace("_", " ")
     if is_ski_sport(sport, title):
@@ -270,32 +315,37 @@ def classify_cross(
     max_hr: float | None,
     long_run_min_minutes: int,
 ) -> str:
-    """Easy / hard / long for bike, nordic ski, and other aerobic cross-training."""
+    """Easy / hard / long for bike, nordic ski, and other aerobic cross-training.
+
+    Long easy (cross_easy_long) raises CTL/ATL but does not use the long-run /
+    hard spacing gates. New classifications use cross_easy_long for long easy
+    work; cross_long remains only for legacy DuckDB rows (still in HARD_OR_LONG).
+    """
     blob = _norm(title)
     sport_n = _sport_key(sport)
     long_min = cross_long_minutes(sport, title, long_run_min_minutes)
     if _contains_any(blob, CROSS_HARD_KEYWORDS):
         return CROSS_HARD
     if _contains_any(blob, CROSS_LONG_KEYWORDS):
-        return CROSS_LONG
+        return CROSS_EASY_LONG
     if _contains_any(blob, CROSS_EASY_KEYWORDS):
         if duration_min is not None and duration_min >= long_min:
-            return CROSS_LONG
+            return CROSS_EASY_LONG
         return CROSS_EASY
     peak = max_hr or 185.0
     if avg_hr and peak:
         # Cycling HR is often a bit lower than running at the same RPE.
-        # 0.84 ≈ clearly hard; 0.78 ≈ tempo-ish. Raise to require higher HR
-        # before a ride/ski is tagged hard.
+        # Short rides need a higher ratio (max spikes inflate avg/max).
+        # 0.84 ≈ clearly hard for mid/long; 0.86 ≈ hard for short.
         ratio = avg_hr / peak
         if duration_min is not None and duration_min >= long_min:
-            return CROSS_HARD if ratio >= 0.84 else CROSS_LONG
-        if duration_min is not None and duration_min < 80 and ratio >= 0.84:
+            return CROSS_HARD if ratio >= 0.84 else CROSS_EASY_LONG
+        if duration_min is not None and duration_min > 40 and ratio >= 0.84:
             return CROSS_HARD
-        if duration_min is not None and duration_min >= 25 and ratio >= 0.78:
+        if duration_min is not None and duration_min >= 25 and ratio >= 0.86:
             return CROSS_HARD
     if duration_min is not None and duration_min >= long_min:
-        return CROSS_LONG
+        return CROSS_EASY_LONG
     if sport_n in {"ebikeride", "ebike"}:
         return CROSS_EASY
     if duration_min is not None and duration_min < 12:
@@ -361,7 +411,9 @@ def session_from_strava_slot(
     activity_id = attrs.get("activity_id")
     if activity_id is not None:
         activity_id = str(activity_id)
-    when = parse_date(state_value(date_entity) or attrs.get("date"), tz)
+    raw_when = state_value(date_entity) or attrs.get("date") or attrs.get("start_date")
+    started_at = parse_datetime(raw_when, tz)
+    when = started_at.date() if started_at else parse_date(raw_when, tz)
     duration = parse_duration_minutes(state_value(moving_entity)) or parse_duration_minutes(
         state_value(elapsed_entity)
     )
@@ -379,11 +431,12 @@ def session_from_strava_slot(
         sport=sport or "Unknown",
         when=when,
         duration_min=duration,
-        distance_m=parse_float(state_value(distance_entity)),
+        distance_m=strava_distance_metres(parse_float(state_value(distance_entity))),
         avg_hr=parse_float(state_value(avg_hr_entity)),
         max_hr=parse_float(state_value(max_hr_entity)),
         source="strava",
         activity_id=activity_id,
+        started_at=started_at,
     )
 
 
@@ -420,14 +473,15 @@ def session_from_garmin_activity(
     activity_id = item.get("activityId") or item.get("activity_id")
     if activity_id is not None:
         activity_id = f"g:{activity_id}"
-    when = parse_date(
+    raw_when = (
         item.get("startTimeLocal")
         or item.get("startTimeGMT")
         or item.get("startTime")
         or item.get("start_time")
-        or item.get("beginTimestamp"),
-        tz,
+        or item.get("beginTimestamp")
     )
+    started_at = parse_datetime(raw_when, tz)
+    when = started_at.date() if started_at else parse_date(raw_when, tz)
     duration = _garmin_duration_minutes(
         item.get("duration") or item.get("elapsedDuration") or item.get("movingDuration")
     )
@@ -450,6 +504,7 @@ def session_from_garmin_activity(
         max_hr=parse_float(item.get("maxHR") or item.get("maxHeartRate")),
         source="garmin",
         activity_id=activity_id,
+        started_at=started_at,
     )
 
 
@@ -479,34 +534,73 @@ def session_family(session: Session) -> str:
     return session.session_type or "other"
 
 
+def effective_distance_m(session: Session) -> float | None:
+    """Metres for compare/merge; fixes legacy Strava-km rows still in DuckDB."""
+    if session.distance_m is None:
+        return None
+    if session.source == "strava" and 0 < session.distance_m < 1000:
+        return session.distance_m * 1000.0
+    return session.distance_m
+
+
 def sessions_look_same(left: Session, right: Session) -> bool:
-    """True when Garmin and Strava (or history) describe the same outing."""
+    """True when Garmin and Strava (or history) describe the same outing.
+
+    Prefer start-time proximity (~45 min) so morning + afternoon doubles stay
+    distinct. Without clock times, require tight duration (≤5 min) and distance.
+    """
     if left.activity_id and right.activity_id and left.activity_id == right.activity_id:
         return True
     if session_day(left) != session_day(right) or session_day(left) is None:
         return False
     if session_family(left) != session_family(right):
         return False
+
     duration_close = (
         left.duration_min is not None
         and right.duration_min is not None
         and abs(left.duration_min - right.duration_min) <= 20
     )
+    left_m = effective_distance_m(left)
+    right_m = effective_distance_m(right)
     distance_close = False
-    if left.distance_m and right.distance_m:
-        longer = max(left.distance_m, right.distance_m)
+    if left_m and right_m:
+        longer = max(left_m, right_m)
         if longer > 0:
-            distance_close = abs(left.distance_m - right.distance_m) / longer <= 0.25
-    return duration_close or distance_close
+            distance_close = abs(left_m - right_m) / longer <= 0.25
+
+    left_clock = _has_clock_time(left.started_at)
+    right_clock = _has_clock_time(right.started_at)
+    if left_clock and right_clock:
+        assert left.started_at is not None and right.started_at is not None
+        if abs(left.started_at - right.started_at) > SAME_OUTING_START_WINDOW:
+            return False
+        # Same start window: duration agreement is enough (distance units can differ).
+        return duration_close or (left.duration_min is None and right.duration_min is None)
+
+    # Date-only / legacy rows: keep morning+afternoon doubles (often ~5–10 min apart
+    # in duration) while still collapsing near-identical Garmin/Strava copies.
+    duration_tight = (
+        left.duration_min is not None
+        and right.duration_min is not None
+        and abs(left.duration_min - right.duration_min) <= 5
+    )
+    return duration_tight and distance_close
 
 
 def merge_training_sessions(*groups: list[Session]) -> list[Session]:
     """Keep Strava over Garmin over history stubs when they are the same session."""
     rank = {"strava": 0, "garmin": 1, "history": 2}
+
+    def sort_key(session: Session) -> tuple:
+        day = session_day(session) or date.min
+        start_ts = session.started_at.timestamp() if session.started_at is not None else 0.0
+        return (rank.get(session.source, 9), day, start_ts)
+
     combined: list[Session] = []
     for group in groups:
         combined.extend(group)
-    combined.sort(key=lambda session: (rank.get(session.source, 9), session_day(session) or date.min))
+    combined.sort(key=sort_key)
     kept: list[Session] = []
     for session in combined:
         if any(sessions_look_same(session, existing) for existing in kept):

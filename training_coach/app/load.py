@@ -7,8 +7,9 @@ Banister-style exponentially weighted averages of session load:
 - TSB (training stress balance, "form") = CTL − ATL.
   Positive TSB = relatively fresh; large negative = overreached.
 
-Session load = duration_min × intensity. Tune INTENSITY / CTL_TAU / ATL_TAU below;
-do not change add-on options for this — it is code-side on purpose.
+Session load = duration_min × intensity. Intensities and CTL_TAU / ATL_TAU are
+fixed code constants (not calibrated per athlete; not HR-TRIMP/TSS). Tune them
+below — do not expose as add-on options.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from datetime import date, timedelta
 
 from classify import (
     CROSS_EASY,
+    CROSS_EASY_LONG,
     CROSS_HARD,
     CROSS_LONG,
     CROSS_TYPES,
@@ -42,7 +44,8 @@ INTENSITY = {
     INTERVALS: 0.95,  # VO2 / repeats; almost a full hard hour
     STRENGTH: 0.4,  # gym; little running-specific fatigue
     CROSS_EASY: 0.45,  # easy bike/spin; less than an easy run
-    CROSS_LONG: 0.65,  # long ride; less eccentric than a long run
+    CROSS_EASY_LONG: 0.55,  # long Z2 bike/ski; more than short easy, less than hard
+    CROSS_LONG: 0.65,  # legacy taxing long ride; less eccentric than a long run
     CROSS_HARD: 0.8,  # bike/ski intervals or a high-HR session
     "other": 0.5,  # unknown sport with duration
     "rest": 0.0,

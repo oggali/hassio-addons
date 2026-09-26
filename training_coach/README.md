@@ -15,22 +15,23 @@ v1 is a physiology + weekly-structure + optional race-goal planner. It is not me
 | `tempo` | Comfortably hard threshold / marathon-pace block |
 | `strength` | Gym / strength |
 | `cross_easy` | Easy bike / nordic ski / swim (not prescribed; logged from Strava) |
+| `cross_easy_long` | Long easy bike / ski — counts toward load, does **not** block like a long run |
 | `cross_hard` | Hard bike or ski intervals, races, high-HR sessions |
-| `cross_long` | Long endurance ride or ski |
+| `cross_long` | Legacy taxing long ride/ski (still blocks like a long run if present in history) |
 
-Hard running sessions are `intervals` and `tempo`. A long run is taxing but not a quality day. Bike and **nordic / skate ski** are not recommended as the day’s session, but Strava still counts them. Easy spins or classic technique do not block a quality run; hard or long rides/skis raise CTL/ATL and use the same next-day recovery gates as a hard or long run. Ski minutes count a bit heavier than the same time on the bike (more legs). Downhill alpine days are ignored as aerobic cross-training. Ride/ski km do not count toward running volume or race-time prediction.
+Hard running sessions are `intervals` and `tempo`. A long run is taxing but not a quality day. Bike and **nordic / skate ski** are not recommended as the day’s session, but Strava still counts them. Easy spins, classic technique, and **long easy** rides/skis raise CTL/ATL but do not block a quality run; hard rides/skis (and legacy `cross_long`) use the same next-day recovery gates as a hard or long run. Ski minutes count a bit heavier than the same time on the bike (more legs). Downhill alpine days are ignored as aerobic cross-training. Ride/ski km do not count toward running volume or race-time prediction.
 
 Morning lines look like `Easy run  6–10 km  @  5:50–6:30 /km` or `Intervals  8–11 km  @  4:20–4:35 /km  (8×400 m, jog recoveries)`.
 
 ## How it decides
 
 1. **Recovery band** (`poor` / `ok` / `good`) from Oura (primary) and Garmin (confirm).
-2. **Sport sessions** from Strava recent activities + splits, and Garmin **completed** activities (`last_activity` / `last_activities`). The same outing is not counted twice. **Oura workouts are ignored** — the ring auto-detects walks and easy movement that are not structured training.
+2. **Sport sessions** from Strava recent activities + splits, and Garmin **completed** activities (`last_activity` / `last_activities`). Garmin/Strava copies of the **same outing** are merged when start times are within ~45 minutes (and duration agrees); morning + afternoon doubles stay separate. **Oura workouts are ignored** — the ring auto-detects walks and easy movement that are not structured training.
 3. **Daily activity** (steps, active calories, intensity minutes) is fused from Oura Activity + Garmin daily totals so rest-day walking still shows up as load. This does **not** mark the day as already trained.
 4. **Live prefs** (Home Assistant helpers, not add-on config): race date / distance / target time and weekly long / quality / strength / rest caps. Changing a helper does **not** restart the add-on; the coach polls and rebuilds the remaining calendar.
 5. **No race set:** same daily quota picker as before (1 long, 1 quality, 2 strength, 1 rest by default).
-6. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. Long-run km is at least **2.2× weekday easy** or **~90 min** at easy pace (not the median of sessions that barely cleared the 75-min “long” tag). A small Monte Carlo search nudges remaining days; a second Monte Carlo publishes P10 / P50 / P90 finish time.
-7. **Gates:** rest mode or poor recovery still wins over the calendar. Okay recovery uses the **low** end of the km range and downgrades quality/long.
+6. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. Long-run km is at least **2.2× weekday easy** or **~90 min** at easy pace (not the median of sessions that barely cleared the 75-min “long” tag). A small Monte Carlo search nudges remaining days (penalizes Banister-style TSB below −25); a second Monte Carlo publishes P10 / P50 / P90 finish time.
+7. **Gates:** rest mode or poor recovery still wins over the calendar. Okay recovery uses the **low** end of the km range and downgrades quality/long. Hard/long spacing uses logged quality, long runs, and `cross_hard` / legacy `cross_long` — not `cross_easy` or `cross_easy_long`.
 
 Book training plans are **not** copied. The calendar uses public periodization rules and your data.
 
@@ -41,8 +42,8 @@ Finish-time math follows public race-prediction ideas (Riegel’s formula and a 
 At `evening_time` (default 20:30):
 
 - Telegram **always** recaps planned vs **all** of today’s Strava/Garmin training sessions (not just the hardest one), fused day activity (Oura + Garmin steps/calories), and names tomorrow’s calendar session. If today already had quality/long and tomorrow’s calendar is another hard day, it says that morning will switch it (recovery is not known yet, so it does not pick easy vs rest).
-- If **Android is off**, Telegram names the feeling / did-plan / skip-reason helpers so you can set them in HA.
-- If **`mobile_notify_service` is set**, the phone gets the same recap **plus** action buttons (Android allows three). Taps write those helpers, then that card becomes a short **Logged:** confirmation and auto-dismisses. Telegram does **not** ask questions in that case.
+- If **Android is off**, Telegram names the feeling / did-plan / skip-reason / effort-fit helpers so you can set them in HA.
+- If **`mobile_notify_service` is set**, the phone gets the same recap **plus** action buttons (Android allows three). Taps write those helpers, then that card becomes a short **Logged:** confirmation and auto-dismisses — except **Did it / Changed** (and **feeling** when the session already matched) which open a follow-up **Too easy / Right / Too hard** card. Telegram does **not** ask questions in that case.
 
 Skipped-vs-done is stored even if you never tap. A late run after evening is corrected the next morning.
 
@@ -60,6 +61,7 @@ Created on startup if missing (same helper API as **Settings → Devices & servi
 - `input_select.training_coach_feeling` — `unset` / `great` / `ok` / `tired` / `wiped`
 - `input_select.training_coach_did_plan` — `unset` / `yes` / `modified` / `skipped`
 - `input_select.training_coach_skip_reason` — `unset` / `no_time` / `tired` / `sore` / `weather` / `other_sport`
+- `input_select.training_coach_effort_fit` — `unset` / `too_easy` / `about_right` / `too_hard` (asked after did/modified, or after feeling when the session already matched)
 
 Every prefs change is appended to DuckDB `prefs_history` (old rows keep `valid_to`).
 
@@ -76,6 +78,10 @@ data:
 input: '{"cmd":"checkin","feeling":"tired","did_plan":"skipped","skip_reason":"sore"}'
 ```
 
+```yaml
+input: '{"cmd":"checkin","feeling":"great","did_plan":"yes","effort_fit":"too_easy"}'
+```
+
 ## Local DuckDB store
 
 Live path: `/data/coach.duckdb` (kept forever; no auto-prune). That file stays inside this app and is locked while it runs.
@@ -84,12 +90,12 @@ A full copy in the same DuckDB format is written to `/share/training_coach/coach
 
 | Table | What |
 |---|---|
-| `sessions` | Classified workouts |
+| `sessions` | Classified workouts (`when_day`, optional `started_at`, load fields) |
 | `recovery_daily` | Morning recovery snapshot |
 | `decisions` | Published morning plan |
 | `prefs_history` | Race goal + weekly caps over time |
 | `plan_days` | Remaining calendar after Monte Carlo search |
-| `feedback_history` | Evening compliance + feeling |
+| `feedback_history` | Evening compliance, feeling, skip reason, **effort_fit** |
 
 ### Wipe and re-seed
 
@@ -107,7 +113,7 @@ Use your real add-on slug if it differs. After wipe, the next plan run re-seeds 
 - `sensor.training_coach_session` — session type, title, km/pace, why, upcoming week
 - `sensor.training_coach_summary` — human-readable title plus full text in `text`
 - `sensor.training_coach_goal` — days to race, target, **P10/P50/P90**, hit probability, CTL/TSB
-- `sensor.training_coach_feedback` — last evening compliance + feeling
+- `sensor.training_coach_feedback` — last evening compliance, feeling, skip reason, effort_fit
 
 ## Configuration (add-on UI, ops only)
 

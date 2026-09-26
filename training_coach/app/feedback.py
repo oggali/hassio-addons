@@ -1,13 +1,23 @@
-"""Evening check-in: planned vs actual, Android actions, helper copy."""
+"""Evening check-in: planned vs actual, Android actions, helper copy.
+
+Feeling / did-plan / skip-reason are primary. After Did it / Changed (or after
+feeling when compliance already shows the session was done), a follow-up asks
+effort_fit (too_easy / about_right / too_hard) for later prescription tuning.
+"""
 
 from __future__ import annotations
 
 from datetime import date, timedelta
 
 from classify import HARD_OR_LONG, QUALITY, REST, Session, is_training_session, session_day
-from entities import DID_PLAN_HELPER, FEELING_HELPER, SKIP_REASON_HELPER
+from entities import DID_PLAN_HELPER, EFFORT_FIT_HELPER, FEELING_HELPER, SKIP_REASON_HELPER
 from features import DayActivity
-from goal import DID_PLAN_OPTIONS, FEELING_OPTIONS, SKIP_REASON_OPTIONS
+from goal import (
+    DID_PLAN_OPTIONS,
+    EFFORT_FIT_OPTIONS,
+    FEELING_OPTIONS,
+    SKIP_REASON_OPTIONS,
+)
 from paces import format_pace_range
 from planner import TITLES
 from recipes import format_km_range
@@ -18,9 +28,14 @@ COMPLIANCE_SUBSTITUTED = "substituted"
 COMPLIANCE_SKIPPED = "skipped"
 COMPLIANCE_EXTRA = "extra"
 
+# Compliance values that mean the athlete did (or mostly did) the session —
+# enough to ask whether the prescription was too easy / right / too hard.
+DID_SESSION_COMPLIANCE = {COMPLIANCE_MATCH, COMPLIANCE_FAMILY, COMPLIANCE_SUBSTITUTED}
+
 TAG_CHECKIN_COMP = "training_coach_checkin_comp"
 TAG_CHECKIN_FEEL = "training_coach_checkin_feel"
 TAG_CHECKIN_SKIP = "training_coach_checkin_skip"
+TAG_CHECKIN_EFFORT = "training_coach_checkin_effort"
 ACK_TIMEOUT_SECONDS = 8
 ACK_LABELS = {
     ("comp", "yes"): "Did it",
@@ -35,6 +50,9 @@ ACK_LABELS = {
     ("skip", "sore"): "Sore",
     ("skip", "weather"): "Weather",
     ("skip", "other_sport"): "Other",
+    ("effort", "too_easy"): "Too easy",
+    ("effort", "about_right"): "About right",
+    ("effort", "too_hard"): "Too hard",
 }
 
 
@@ -297,6 +315,11 @@ def recap_text(
             "Please set how it felt in HA: "
             f"{FEELING_HELPER}, {DID_PLAN_HELPER}"
             + (f", {SKIP_REASON_HELPER}" if compliance != COMPLIANCE_MATCH else "")
+            + (
+                f", {EFFORT_FIT_HELPER}"
+                if compliance in DID_SESSION_COMPLIANCE
+                else ""
+            )
             + "."
         )
     return "\n".join(lines)
@@ -307,6 +330,7 @@ def checkin_tag(kind: str) -> str | None:
         "comp": TAG_CHECKIN_COMP,
         "feel": TAG_CHECKIN_FEEL,
         "skip": TAG_CHECKIN_SKIP,
+        "effort": TAG_CHECKIN_EFFORT,
     }.get(kind)
 
 
@@ -320,12 +344,46 @@ def action_ack_message(parsed: dict) -> str:
     return f"Logged: {label}" if label else "Logged"
 
 
-def android_followups(parsed: dict, day: date) -> list[dict]:
+def effort_fit_actions(day: date) -> dict:
+    key = day.isoformat()
+    return {
+        "tag": TAG_CHECKIN_EFFORT,
+        "actions": [
+            {"action": f"coach_{key}_effort_too_easy", "title": "Too easy"},
+            {"action": f"coach_{key}_effort_about_right", "title": "Right"},
+            {"action": f"coach_{key}_effort_too_hard", "title": "Too hard"},
+        ],
+    }
+
+
+def _effort_followup(day: date, clear_tag: str) -> list[dict]:
+    pack = effort_fit_actions(day)
+    return [
+        {"message": "clear_notification", "android_data": {"tag": clear_tag}},
+        {
+            "message": "Was the session too easy, about right, or too hard?",
+            "android_data": {
+                "tag": pack["tag"],
+                "actions": pack["actions"],
+                "sticky": True,
+            },
+        },
+    ]
+
+
+def android_followups(
+    parsed: dict,
+    day: date,
+    *,
+    compliance: str | None = None,
+) -> list[dict]:
     """Companion payloads after a button tap (same tag replaces the sticky card)."""
     tag = checkin_tag(str(parsed.get("kind") or ""))
     if not tag:
         return []
-    if parsed.get("kind") == "comp" and parsed.get("option") == "skipped":
+    kind = parsed.get("kind")
+    option = parsed.get("option")
+    if kind == "comp" and option == "skipped":
         pack = skip_reason_actions(day)
         return [
             {"message": "clear_notification", "android_data": {"tag": tag}},
@@ -338,6 +396,10 @@ def android_followups(parsed: dict, day: date) -> list[dict]:
                 },
             },
         ]
+    if kind == "comp" and option in {"yes", "modified"}:
+        return _effort_followup(day, tag)
+    if kind == "feel" and compliance in DID_SESSION_COMPLIANCE:
+        return _effort_followup(day, tag)
     return [
         {
             "message": action_ack_message(parsed),
@@ -422,9 +484,14 @@ def parse_coach_action(action: str, reply_text: str | None = None) -> dict | Non
         if rest == "other" and reply_text:
             out["notes"] = reply_text
             out["option"] = "other_sport"
+    elif kind == "effort":
+        option = rest if rest in EFFORT_FIT_OPTIONS else None
+        out["helper"] = EFFORT_FIT_HELPER
+        out["option"] = option
+        out["field"] = "effort_fit"
     else:
         return None
-    allowed = DID_PLAN_OPTIONS + FEELING_OPTIONS + SKIP_REASON_OPTIONS
+    allowed = DID_PLAN_OPTIONS + FEELING_OPTIONS + SKIP_REASON_OPTIONS + EFFORT_FIT_OPTIONS
     if out.get("option") not in allowed:
         return None
     return out
