@@ -208,6 +208,16 @@ class Session:
     # Wall-clock start when the sensor provides it (used to collapse Garmin/Strava
     # of the same outing without merging morning + afternoon doubles).
     started_at: datetime | None = None
+    # Strava Relative Effort (API suffer_score); only when HR was present.
+    relative_effort: float | None = None
+    # duration_min × intensity; filled on DuckDB upsert (see load.session_load).
+    session_load: float | None = None
+    # Banister walk immediately before/after this session (see load.annotate_session_banister).
+    ctl_before: float | None = None
+    atl_before: float | None = None
+    ctl_after: float | None = None
+    atl_after: float | None = None
+    tsb_after: float | None = None
 
 
 def _norm(value: Any) -> str:

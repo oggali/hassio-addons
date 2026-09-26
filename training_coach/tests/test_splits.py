@@ -15,7 +15,7 @@ from classify import EASY_RUN, INTERVALS, TEMPO  # noqa: E402
 from entities import STRAVA_LATEST_SPLITS  # noqa: E402
 from features import build_snapshot  # noqa: E402
 from settings import Settings  # noqa: E402
-from splits import SplitSet, classify_from_splits  # noqa: E402
+from splits import SplitSet, classify_from_splits, parse_split_entity  # noqa: E402
 from test_planner import SATURDAY, add_strava, entity, good_recovery  # noqa: E402
 
 TZ = ZoneInfo("Europe/Helsinki")
@@ -37,6 +37,22 @@ def km_splits(*paces: float) -> list[dict]:
 
 
 class SplitClassifyTests(unittest.TestCase):
+    def test_parse_relative_effort(self):
+        ent = entity(
+            5,
+            SATURDAY,
+            activity_id=42,
+            activity_name="Easy",
+            activity_type="Run",
+            distance_m=5000,
+            moving_time_s=1800,
+            splits_metric=km_splits(5.5, 5.5, 5.5, 5.5, 5.5),
+            relative_effort=22,
+        )
+        parsed = parse_split_entity(ent, TZ)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.relative_effort, 22.0)
+
     def test_intervals_from_alternating_km(self):
         split_set = SplitSet(
             activity_id="1",

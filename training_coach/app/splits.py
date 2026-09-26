@@ -24,6 +24,7 @@ class SplitSet:
     splits: list[dict[str, Any]] = field(default_factory=list)
     laps: list[dict[str, Any]] = field(default_factory=list)
     last_changed: datetime | None = None
+    relative_effort: float | None = None
 
     @property
     def when(self) -> date | None:
@@ -60,6 +61,7 @@ def parse_split_entity(entity: dict[str, Any] | None, tz: ZoneInfo) -> SplitSet 
         splits=list(splits) if isinstance(splits, list) else [],
         laps=list(laps) if isinstance(laps, list) else [],
         last_changed=last_updated(entity, tz),
+        relative_effort=parse_float(attrs.get("relative_effort")),
     )
 
 
@@ -180,6 +182,8 @@ def apply_splits_to_sessions(
         used_ids.add(matched.activity_id)
         session.activity_id = matched.activity_id
         session.splits = matched.splits
+        if matched.relative_effort is not None:
+            session.relative_effort = matched.relative_effort
         hint = classify_from_splits(matched)
         session.session_type = _reclassify(session, hint, long_run_min_minutes)
 
@@ -215,6 +219,7 @@ def apply_splits_to_sessions(
                 source="strava_splits",
                 activity_id=split_set.activity_id,
                 splits=split_set.splits,
+                relative_effort=split_set.relative_effort,
             )
         )
     return sessions + extras

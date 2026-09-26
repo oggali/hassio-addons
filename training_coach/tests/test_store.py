@@ -47,6 +47,7 @@ class StoreTests(unittest.TestCase):
                 splits=[{"distance_m": 1000, "pace_min_km": 4.0}],
                 source="strava",
                 started_at=started,
+                relative_effort=68.0,
             ),
             Session(
                 session_type=STRENGTH,
@@ -65,8 +66,79 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(by_title["Track intervals"].activity_id, "111")
         self.assertEqual(by_title["Track intervals"].splits[0]["pace_min_km"], 4.0)
         self.assertEqual(by_title["Track intervals"].started_at, started)
+        self.assertEqual(by_title["Track intervals"].relative_effort, 68.0)
+        self.assertAlmostEqual(by_title["Track intervals"].session_load, 45 * 0.95)
+        self.assertAlmostEqual(by_title["Gym"].session_load, 50 * 0.4)
+        # Banister traceback: gym day 1, intervals day 2 (overnight decay, then hard load).
+        self.assertIsNotNone(by_title["Gym"].ctl_before)
+        self.assertIsNotNone(by_title["Gym"].ctl_after)
+        self.assertGreater(by_title["Gym"].ctl_after, by_title["Gym"].ctl_before)
+        self.assertLess(
+            by_title["Track intervals"].ctl_before, by_title["Gym"].ctl_after
+        )
+        self.assertGreater(
+            by_title["Track intervals"].ctl_after,
+            by_title["Track intervals"].ctl_before,
+        )
+        self.assertAlmostEqual(
+            by_title["Track intervals"].tsb_after,
+            by_title["Track intervals"].ctl_after - by_title["Track intervals"].atl_after,
+        )
         self.assertEqual(session_key(by_title["Gym"]), "title:Gym|2026-09-09")
 
+    def test_session_banister_marginal_impact(self) -> None:
+        """Same-day sessions each move CTL; later one starts from earlier one's after."""
+        from datetime import datetime, timezone
+
+        from load import CTL_TAU, annotate_session_banister, session_load
+
+        morning = Session(
+            INTERVALS,
+            "AM",
+            "Run",
+            date(2026, 9, 10),
+            duration_min=40,
+            started_at=datetime(2026, 9, 10, 6, 0, tzinfo=timezone.utc),
+        )
+        evening = Session(
+            EASY_RUN,
+            "PM",
+            "Run",
+            date(2026, 9, 10),
+            duration_min=30,
+            started_at=datetime(2026, 9, 10, 17, 0, tzinfo=timezone.utc),
+        )
+        annotate_session_banister([evening, morning])  # input order should not matter
+        self.assertEqual(morning.ctl_before, 0.0)
+        am_load = session_load(morning)
+        self.assertAlmostEqual(morning.ctl_after, am_load / CTL_TAU)
+        self.assertAlmostEqual(evening.ctl_before, morning.ctl_after)
+        self.assertGreater(evening.ctl_after, evening.ctl_before)
+        self.assertIsNotNone(evening.atl_after)
+        self.assertIsNotNone(evening.tsb_after)
+    def test_upsert_load_daily(self) -> None:
+        from load import LoadSnapshot
+
+        day = date(2026, 9, 12)
+        snap = LoadSnapshot(
+            ctl=40.0,
+            atl=55.0,
+            tsb=-15.0,
+            weekly_km=42.0,
+            easy_km=8.0,
+            long_km=16.0,
+            weekly_load=210.0,
+            daily_load=42.75,
+        )
+        self.store.upsert_load_daily(day, snap)
+        row = self.store.get_load_daily(day)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["ctl"], 40.0)
+        self.assertEqual(row["atl"], 55.0)
+        self.assertEqual(row["tsb"], -15.0)
+        self.assertEqual(row["weekly_load"], 210.0)
+        self.assertEqual(row["daily_load"], 42.75)
+        self.assertEqual(len(self.store.load_load_daily(since=date(2026, 9, 1))), 1)
     def test_load_sessions_since(self) -> None:
         self.store.upsert_sessions(
             [

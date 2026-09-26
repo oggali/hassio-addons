@@ -90,12 +90,13 @@ A full copy in the same DuckDB format is written to `/share/training_coach/coach
 
 | Table | What |
 |---|---|
-| `sessions` | Classified workouts (`when_day`, optional `started_at`, load fields) |
+| `sessions` | Classified workouts (`when_day`, `relative_effort`, `session_load`, **ctl/atl before→after**, splits) |
 | `recovery_daily` | Morning recovery snapshot |
 | `decisions` | Published morning plan |
 | `prefs_history` | Race goal + weekly caps over time |
 | `plan_days` | Remaining calendar after Monte Carlo search |
 | `feedback_history` | Evening compliance, feeling, skip reason, **effort_fit** |
+| `load_daily` | End-of-day CTL / ATL / TSB / weekly_load (join to feedback by `day`) |
 
 ### Wipe and re-seed
 
@@ -146,7 +147,7 @@ Garmin activity: `sensor.garmin_connect_total_steps`, `sensor.garmin_connect_yes
 
 Strava: `sensor.strava_oskari_vuorinen_recent_activity` and `_2` … `_10`, plus `_date`, `_distance`, `_moving_time`, `_elapsed_time`, `_average_heartrate`, `_max_heartrate`
 
-Splits: `sensor.strava_latest_splits` (pyscript).
+Splits: `sensor.strava_latest_splits` (pyscript) — km splits, laps, **relative_effort**.
 
 ## Installation
 
