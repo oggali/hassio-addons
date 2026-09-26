@@ -13,11 +13,12 @@ import duckdb
 from classify import Session
 from features import Recovery
 from goal import Prefs, normalize_race_distance
+from load import LoadSnapshot, annotate_session_banister, session_load
 from parse import coerce_date
 from planner import Plan
 from settings import Settings
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "6"
 
 
 def _as_date(value: Any) -> date | None:
@@ -71,6 +72,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     max_hr DOUBLE,
     source VARCHAR NOT NULL,
     splits_json VARCHAR,
+    relative_effort DOUBLE,
+    session_load DOUBLE,
+    ctl_before DOUBLE,
+    atl_before DOUBLE,
+    ctl_after DOUBLE,
+    atl_after DOUBLE,
+    tsb_after DOUBLE,
     updated_at TIMESTAMP NOT NULL
 );
 
@@ -155,6 +163,17 @@ CREATE TABLE IF NOT EXISTS feedback_history (
     notes VARCHAR,
     updated_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS load_daily (
+    day DATE PRIMARY KEY,
+    daily_load DOUBLE,
+    ctl DOUBLE,
+    atl DOUBLE,
+    tsb DOUBLE,
+    weekly_load DOUBLE,
+    weekly_km DOUBLE,
+    captured_at TIMESTAMP NOT NULL
+);
 """
 
 
@@ -189,6 +208,13 @@ class CoachStore:
         }
         if "started_at" not in session_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN started_at TIMESTAMP")
+        if "relative_effort" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN relative_effort DOUBLE")
+        if "session_load" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN session_load DOUBLE")
+        for col in ("ctl_before", "atl_before", "ctl_after", "atl_after", "tsb_after"):
+            if col not in session_cols:
+                self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} DOUBLE")
         feedback_cols = {
             row[1]
             for row in self._conn.execute("PRAGMA table_info('feedback_history')").fetchall()
@@ -199,6 +225,9 @@ class CoachStore:
             "INSERT OR REPLACE INTO meta VALUES (?, ?)",
             ["schema_version", SCHEMA_VERSION],
         )
+        # Backfill CTL/ATL traceback after schema upgrades that add the columns.
+        if self.session_count() > 0 and "ctl_after" not in session_cols:
+            self.recompute_session_load_trace()
 
     def get_meta(self, key: str) -> str | None:
         row = self._conn.execute(
@@ -234,13 +263,17 @@ class CoachStore:
             splits_json = None
             if session.splits is not None:
                 splits_json = json.dumps(session.splits, ensure_ascii=False)
+            load = session_load(session)
+            session.session_load = load
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO sessions (
                     session_key, activity_id, session_type, title, sport, when_day,
                     started_at, duration_min, distance_m, avg_hr, max_hr, source,
-                    splits_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    splits_json, relative_effort, session_load,
+                    ctl_before, atl_before, ctl_after, atl_after, tsb_after,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     key,
@@ -256,18 +289,59 @@ class CoachStore:
                     session.max_hr,
                     session.source,
                     splits_json,
+                    session.relative_effort,
+                    load,
+                    session.ctl_before,
+                    session.atl_before,
+                    session.ctl_after,
+                    session.atl_after,
+                    session.tsb_after,
                     now,
                 ],
             )
             count += 1
+        if count:
+            self.recompute_session_load_trace()
         return count
+
+    def recompute_session_load_trace(self) -> int:
+        """Re-walk all dated sessions and persist CTL/ATL before→after per row."""
+        sessions = self.load_sessions()
+        annotate_session_banister(sessions)
+        now = datetime.now(timezone.utc)
+        updated = 0
+        for session in sessions:
+            if session.when is None:
+                continue
+            self._conn.execute(
+                """
+                UPDATE sessions
+                SET session_load = ?, ctl_before = ?, atl_before = ?,
+                    ctl_after = ?, atl_after = ?, tsb_after = ?, updated_at = ?
+                WHERE session_key = ?
+                """,
+                [
+                    session.session_load,
+                    session.ctl_before,
+                    session.atl_before,
+                    session.ctl_after,
+                    session.atl_after,
+                    session.tsb_after,
+                    now,
+                    session_key(session),
+                ],
+            )
+            updated += 1
+        return updated
 
     def load_sessions(self, since: date | None = None) -> list[Session]:
         if since is None:
             rows = self._conn.execute(
                 """
                 SELECT activity_id, session_type, title, sport, when_day, started_at,
-                       duration_min, distance_m, avg_hr, max_hr, source, splits_json
+                       duration_min, distance_m, avg_hr, max_hr, source, splits_json,
+                       relative_effort, session_load,
+                       ctl_before, atl_before, ctl_after, atl_after, tsb_after
                 FROM sessions
                 ORDER BY when_day DESC NULLS LAST, started_at DESC NULLS LAST
                 """
@@ -276,7 +350,9 @@ class CoachStore:
             rows = self._conn.execute(
                 """
                 SELECT activity_id, session_type, title, sport, when_day, started_at,
-                       duration_min, distance_m, avg_hr, max_hr, source, splits_json
+                       duration_min, distance_m, avg_hr, max_hr, source, splits_json,
+                       relative_effort, session_load,
+                       ctl_before, atl_before, ctl_after, atl_after, tsb_after
                 FROM sessions
                 WHERE when_day IS NULL OR when_day >= ?
                 ORDER BY when_day DESC NULLS LAST, started_at DESC NULLS LAST
@@ -303,9 +379,88 @@ class CoachStore:
                     source=row[10],
                     splits=splits,
                     started_at=started_at,
+                    relative_effort=row[12],
+                    session_load=row[13],
+                    ctl_before=row[14],
+                    atl_before=row[15],
+                    ctl_after=row[16],
+                    atl_after=row[17],
+                    tsb_after=row[18],
                 )
             )
         return out
+
+    def upsert_load_daily(self, day: date, load: LoadSnapshot) -> None:
+        """Persist end-of-day Banister snapshot for feedback / calibration joins."""
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO load_daily (
+                day, daily_load, ctl, atl, tsb, weekly_load, weekly_km, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                day,
+                load.daily_load,
+                load.ctl,
+                load.atl,
+                load.tsb,
+                load.weekly_load,
+                load.weekly_km,
+                datetime.now(timezone.utc),
+            ],
+        )
+
+    def get_load_daily(self, day: date) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            """
+            SELECT daily_load, ctl, atl, tsb, weekly_load, weekly_km
+            FROM load_daily WHERE day = ?
+            """,
+            [day],
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "day": day,
+            "daily_load": row[0],
+            "ctl": row[1],
+            "atl": row[2],
+            "tsb": row[3],
+            "weekly_load": row[4],
+            "weekly_km": row[5],
+        }
+
+    def load_load_daily(self, since: date | None = None) -> list[dict[str, Any]]:
+        if since is None:
+            rows = self._conn.execute(
+                """
+                SELECT day, daily_load, ctl, atl, tsb, weekly_load, weekly_km
+                FROM load_daily
+                ORDER BY day
+                """
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT day, daily_load, ctl, atl, tsb, weekly_load, weekly_km
+                FROM load_daily
+                WHERE day >= ?
+                ORDER BY day
+                """,
+                [since],
+            ).fetchall()
+        return [
+            {
+                "day": _as_date(row[0]),
+                "daily_load": row[1],
+                "ctl": row[2],
+                "atl": row[3],
+                "tsb": row[4],
+                "weekly_load": row[5],
+                "weekly_km": row[6],
+            }
+            for row in rows
+        ]
 
     def upsert_recovery(
         self,

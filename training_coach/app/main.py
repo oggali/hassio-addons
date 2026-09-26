@@ -236,6 +236,7 @@ def rebuild_calendar(store: CoachStore, snapshot, prefs: Prefs, feeling: str | N
     chosen = search_calendar(skeleton, load, prefs, paces, feedback, finish)
     store.replace_plan_days([d.as_dict() for d in chosen])
     store.set_meta("plan_fingerprint", prefs.fingerprint)
+    store.upsert_load_daily(snapshot.today, load)
     return chosen, load, paces, finish
 
 
@@ -520,6 +521,11 @@ def run_evening(
     manager: PrefsManager,
 ) -> None:
     _, snapshot = ingest(client, settings, store, wait_oura=False)
+    # End-of-day Banister snapshot (includes today's logged sessions) for
+    # joining to feedback_history / effort_fit later.
+    store.upsert_load_daily(
+        snapshot.today, build_load_snapshot(snapshot.sessions, snapshot.today)
+    )
     decision = store.get_decision(snapshot.today)
     if not decision:
         log("No morning plan today; skipping evening check-in")

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from classify import (
     CROSS_EASY,
@@ -88,6 +88,7 @@ class LoadSnapshot:
     easy_km: float  # median easy-run distance; sizes weekday easy slots
     long_km: float  # typical long (weekly longest / classified); floored vs easy in periodize
     weekly_load: float  # sum of session_load over last 7 days
+    daily_load: float = 0.0  # sum of session_load on `today`
 
 
 def session_load(session: Session) -> float:
@@ -98,6 +99,61 @@ def session_load(session: Session) -> float:
     if session.session_type in CROSS_TYPES and is_ski_sport(session.sport, session.title or ""):
         intensity = min(SKI_LOAD_CAP, intensity + SKI_LOAD_BONUS)
     return duration * intensity
+
+
+def annotate_session_banister(sessions: list[Session]) -> list[Session]:
+    """Stamp each dated session with CTL/ATL before→after this session's load.
+
+    Walks chronologically (when_day, started_at). Empty days between sessions
+    still decay toward 0 (same τ as planning). Multiple sessions on one day
+    each apply their own EWMA step in start-time order so you can see the
+    marginal impact of every workout in the sessions table.
+
+    Planning / load_daily still use the day-summed Banister in ctl_atl_tsb —
+    end-of-day values can differ slightly on multi-session days.
+    """
+    dated = [s for s in sessions if s.when is not None]
+    undated = [s for s in sessions if s.when is None]
+    for session in undated:
+        session.ctl_before = None
+        session.atl_before = None
+        session.ctl_after = None
+        session.atl_after = None
+        session.tsb_after = None
+
+    dated.sort(
+        key=lambda s: (
+            s.when,
+            s.started_at or datetime.min.replace(tzinfo=timezone.utc),
+            s.title or "",
+            s.activity_id or "",
+        )
+    )
+    if not dated:
+        return sessions
+
+    ctl = 0.0
+    atl = 0.0
+    cursor = dated[0].when
+    assert cursor is not None
+    for session in dated:
+        day = session.when
+        assert day is not None
+        while cursor < day:
+            ctl += (0.0 - ctl) / CTL_TAU
+            atl += (0.0 - atl) / ATL_TAU
+            cursor += timedelta(days=1)
+        load = session_load(session)
+        session.session_load = load
+        session.ctl_before = ctl
+        session.atl_before = atl
+        ctl += (load - ctl) / CTL_TAU
+        atl += (load - atl) / ATL_TAU
+        session.ctl_after = ctl
+        session.atl_after = atl
+        session.tsb_after = ctl - atl
+        cursor = day
+    return sessions
 
 
 def loads_by_day(sessions: list[Session]) -> dict[date, float]:
@@ -200,6 +256,7 @@ def build_load_snapshot(sessions: list[Session], today: date) -> LoadSnapshot:
     long_km = max(classified_long, weekly_long)
     if long_km <= 0:
         long_km = TYPICAL_LONG_KM
+    daily = loads_by_day(sessions).get(today, 0.0)
     return LoadSnapshot(
         ctl=ctl,
         atl=atl,
@@ -208,4 +265,5 @@ def build_load_snapshot(sessions: list[Session], today: date) -> LoadSnapshot:
         easy_km=typical_run_km(sessions, EASY_RUN, TYPICAL_EASY_KM),
         long_km=long_km,
         weekly_load=weekly_load(sessions, today),
+        daily_load=daily,
     )
