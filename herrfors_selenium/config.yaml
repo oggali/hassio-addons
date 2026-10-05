@@ -5,7 +5,6 @@ description: "Fetch Herrfors session token using headless Chrome + Selenium at s
 arch:
   - amd64
   - aarch64
-  - armv7
 startup: services
 boot: auto
 init: false

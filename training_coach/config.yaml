@@ -11,7 +11,7 @@ init: false
 stdin: true
 homeassistant_api: true
 map:
-  - addon_config:rw
+  - app_config:rw
   - share:rw
 options:
   timezone: "Europe/Helsinki"
