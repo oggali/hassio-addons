@@ -17,6 +17,7 @@ from main import (  # noqa: E402
     consume_daily_notify,
     morning_slot_passed,
     next_named_event,
+    parse_stdin_line,
     should_fire_named_event,
     should_log_wait,
 )
@@ -80,6 +81,13 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(morning_slot_passed(at(7, 0), SETTINGS))
         self.assertTrue(morning_slot_passed(at(7, 30), SETTINGS))
         self.assertTrue(morning_slot_passed(at(8, 0), SETTINGS))
+
+    def test_parse_fetch_sessions_command(self) -> None:
+        self.assertEqual(parse_stdin_line("fetch_sessions"), {"cmd": "fetch_sessions"})
+        self.assertEqual(parse_stdin_line('{"cmd":"fetch_sessions"}'), {"cmd": "fetch_sessions"})
+        self.assertEqual(parse_stdin_line("wipe_db"), {"cmd": "wipe_db"})
+        with self.assertRaises(ValueError):
+            parse_stdin_line("nope")
 
     def test_wait_log_is_quiet_until_interval_or_new_slot(self) -> None:
         key = (at(7, 30), "morning")

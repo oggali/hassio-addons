@@ -86,7 +86,7 @@ input: '{"cmd":"checkin","feeling":"great","did_plan":"yes","effort_fit":"too_ea
 
 Live path: `/data/coach.duckdb` (kept forever; no auto-prune). That file stays inside this app and is locked while it runs.
 
-A full copy in the same DuckDB format is written to `/share/training_coach/coach.duckdb` after the morning notification and again at 23:00 (after that, nothing new is written until the next morning). Other apps that map `share` can open that copy read-only. Home Assistant sees it at the same `/share/training_coach/coach.duckdb` path.
+A full copy in the same DuckDB format is written to `/share/training_coach/coach.duckdb` after the morning notification, after `fetch_sessions`, and again at 23:00. Other apps that map `share` can open that copy read-only. Home Assistant sees it at the same `/share/training_coach/coach.duckdb` path.
 
 | Table | What |
 |---|---|
@@ -97,6 +97,19 @@ A full copy in the same DuckDB format is written to `/share/training_coach/coach
 | `plan_days` | Remaining calendar after Monte Carlo search |
 | `feedback_history` | Evening compliance, feeling, skip reason, **effort_fit** |
 | `load_daily` | End-of-day CTL / ATL / TSB / weekly_load (join to feedback by `day`) |
+
+### Fetch sessions now
+
+Strava and Garmin sensors are read at startup, at the morning plan, and at the evening check-in. A workout that shows up on the sensor later is not stored until the next of those. This call reads the sensors immediately, upserts what is there, and refreshes the share copy. It does not send a notification or rebuild today’s plan.
+
+```yaml
+service: hassio.addon_stdin
+data:
+  addon: local_training_coach
+  input: fetch_sessions
+```
+
+The log lists each Strava recent-activity slot (`title`, date sensor, attribute start, activity id) and then each session written. A `DATE MISMATCH` on a slot means the date sensor and the activity attribute disagree; the date sensor wins.
 
 ### Wipe and re-seed
 
