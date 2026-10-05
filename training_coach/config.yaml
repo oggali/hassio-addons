@@ -1,5 +1,5 @@
 name: Training Coach
-version: "2026.10.05" #calendar versioning, .x only when more than 1 patch release in same day, first one yyyy.mm.dd
+version: "2026.10.05.1" #calendar versioning, .x only when more than 1 patch release in same day, first one yyyy.mm.dd
 slug: training_coach
 description: "Morning and evening training coach from Oura, Garmin, and Strava, with live race prefs and Telegram."
 arch:
@@ -11,7 +11,7 @@ init: false
 stdin: true
 homeassistant_api: true
 map:
-  - addon_config:rw
+  - app_config:rw
   - share:rw
 options:
   timezone: "Europe/Helsinki"

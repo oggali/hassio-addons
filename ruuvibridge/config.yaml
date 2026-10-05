@@ -1,19 +1,18 @@
 name: "RuuviBridge hassio add-on"
-version: "25.10.28.4"
+version: "2026.10.05.1"
 slug: "ruuvibridge"
 description: "Bridge for RuuviTag sensor data.."
 arch:
   - amd64
   - aarch64
-  - armv7
 startup: services
 boot: auto
 init: false
 map:
 #  - config:rw
-  - addon_config:rw
+  - app_config:rw
 #  - homeassistant_config:rw
-  - all_addon_configs:rw
+  - all_app_configs:rw
 ports:
   8883/tcp: 8883
   8081/tcp: 8081
