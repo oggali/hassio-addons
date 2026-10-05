@@ -53,6 +53,47 @@ def log(message: str) -> None:
     print(f"[training_coach] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {message}", flush=True)
 
 
+# The wait loop wakes every 30s. Log the countdown when the target changes,
+# then at most this often while the same slot is still ahead.
+SLEEP_LOG_INTERVAL_S = 10 * 60
+
+
+def should_log_wait(
+    now_mono: float,
+    last_mono: float,
+    key: tuple,
+    last_key: tuple | None,
+    interval_s: float = SLEEP_LOG_INTERVAL_S,
+) -> bool:
+    if key != last_key:
+        return True
+    return now_mono - last_mono >= interval_s
+
+
+def format_session_line(session) -> str:
+    when = session.when.isoformat() if session.when else "undated"
+    clock = session.started_at.strftime("%H:%M") if session.started_at else "--:--"
+    activity = session.activity_id or "no-id"
+    return (
+        f"{when} {clock} {session.session_type} {session.title!r} "
+        f"{session.source} {activity}"
+    )
+
+
+def log_upserted_sessions(sessions: list) -> None:
+    ordered = sorted(
+        sessions,
+        key=lambda session: (
+            session.when or date.min,
+            session.started_at.timestamp() if session.started_at else 0.0,
+        ),
+        reverse=True,
+    )
+    log(f"Upserted {len(sessions)} live sessions")
+    for session in ordered:
+        log(f"  {format_session_line(session)}")
+
+
 def parse_hhmm(value: str) -> tuple[int, int]:
     hour, minute = value.strip().split(":")
     return int(hour), int(minute)
@@ -386,7 +427,7 @@ def ingest(client: HomeAssistantClient, settings: Settings, store: CoachStore, w
         states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
     live = collect_live_sessions(states, settings)
     store.upsert_sessions(live)
-    log(f"Upserted {len(live)} live sessions")
+    log_upserted_sessions(live)
     if store.needs_history_seed():
         seed_history(client, settings, store)
         states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
@@ -773,6 +814,8 @@ def main() -> None:
     last_poll = 0.0
     pending_prefs_at: float | None = None
     last_fingerprint = (store.current_prefs() or Prefs.defaults()).fingerprint
+    last_sleep_log_at = 0.0
+    last_sleep_key: tuple | None = None
 
     while True:
         now = datetime.now(settings.tz)
@@ -842,7 +885,12 @@ def main() -> None:
 
         target, kind = next_named_event(datetime.now(settings.tz), settings)
         sleep_s = max(1.0, (target - datetime.now(settings.tz)).total_seconds())
-        log(f"Sleeping {int(sleep_s)}s until {kind} at {target.strftime('%H:%M')}")
+        sleep_key = (target, kind)
+        now_mono = time.monotonic()
+        if should_log_wait(now_mono, last_sleep_log_at, sleep_key, last_sleep_key):
+            log(f"Sleeping {int(sleep_s)}s until {kind} at {target.strftime('%H:%M')}")
+            last_sleep_log_at = now_mono
+            last_sleep_key = sleep_key
         deadline = time.monotonic() + min(sleep_s, 30.0)
         while time.monotonic() < deadline:
             if wipe_requested.is_set():

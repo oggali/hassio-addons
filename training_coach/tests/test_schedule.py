@@ -13,10 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from main import (  # noqa: E402
+    SLEEP_LOG_INTERVAL_S,
     consume_daily_notify,
     morning_slot_passed,
     next_named_event,
     should_fire_named_event,
+    should_log_wait,
 )
 from settings import Settings  # noqa: E402
 from store import CoachStore  # noqa: E402
@@ -78,6 +80,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(morning_slot_passed(at(7, 0), SETTINGS))
         self.assertTrue(morning_slot_passed(at(7, 30), SETTINGS))
         self.assertTrue(morning_slot_passed(at(8, 0), SETTINGS))
+
+    def test_wait_log_is_quiet_until_interval_or_new_slot(self) -> None:
+        key = (at(7, 30), "morning")
+        self.assertTrue(should_log_wait(1000, 0, key, None))
+        self.assertFalse(should_log_wait(1000 + 30, 1000, key, key))
+        self.assertFalse(should_log_wait(1000 + SLEEP_LOG_INTERVAL_S - 1, 1000, key, key))
+        self.assertTrue(should_log_wait(1000 + SLEEP_LOG_INTERVAL_S, 1000, key, key))
+        later = (at(20, 30), "evening")
+        self.assertTrue(should_log_wait(1000 + 30, 1000, later, key))
 
     def test_consume_daily_notify_once(self) -> None:
         tmp = tempfile.TemporaryDirectory()
