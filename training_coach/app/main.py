@@ -16,10 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from entities import (
     FEEDBACK_SENSOR,
+    GARMIN_LAST_ACTIVITIES,
+    GARMIN_LAST_ACTIVITIES_FALLBACK,
     GOAL_SENSOR,
     SESSION_SENSOR,
     STRAVA_LATEST_SPLITS,
     SUMMARY_SENSOR,
+    all_strava_slot_ids,
     tracked_entity_ids,
 )
 from features import build_snapshot, collect_live_sessions
@@ -40,6 +43,7 @@ from ha_client import HomeAssistantClient
 from ha_ws import parse_action_day, run_action_listener, websocket_url
 from load import build_load_snapshot
 from paces import build_paces, format_pace_range
+from parse import attr, first_entity, state_value
 from periodize import PlanDay, build_skeleton
 from planner import Plan, plan_day
 from prefs import PrefsManager
@@ -78,6 +82,39 @@ def format_session_line(session) -> str:
         f"{when} {clock} {session.session_type} {session.title!r} "
         f"{session.source} {activity}"
     )
+
+
+def parse_stdin_line(cmd: str) -> dict:
+    """Turn one stdin line into a command payload."""
+    text = cmd.strip()
+    if not text:
+        raise ValueError("empty stdin command")
+    lower = text.lower()
+    if lower == "wipe_db":
+        return {"cmd": "wipe_db"}
+    if lower in {"fetch_sessions", "refresh_sessions"}:
+        return {"cmd": "fetch_sessions"}
+    if text.startswith("{") or text.startswith("["):
+        payload = json.loads(text)
+    elif lower.startswith("set_prefs"):
+        raw = text.split(" ", 1)[1] if " " in text else "{}"
+        payload = {"cmd": "set_prefs", **json.loads(raw)}
+    elif lower.startswith("checkin"):
+        raw = text.split(" ", 1)[1] if " " in text else "{}"
+        payload = {"cmd": "checkin", **json.loads(raw)}
+    else:
+        raise ValueError(
+            f"Unknown stdin command: {text!r} "
+            "(supported: wipe_db, fetch_sessions, set_prefs, checkin)"
+        )
+    if not isinstance(payload, dict):
+        raise ValueError("stdin JSON must be an object")
+    if "cmd" not in payload:
+        if "feeling" in payload or "did_plan" in payload:
+            payload["cmd"] = "checkin"
+        else:
+            payload["cmd"] = "set_prefs"
+    return payload
 
 
 def log_upserted_sessions(sessions: list) -> None:
@@ -420,11 +457,69 @@ def notify_plan(client: HomeAssistantClient, settings: Settings, plan: Plan) -> 
     notify_message(client, settings, "Training coach", message)
 
 
-def ingest(client: HomeAssistantClient, settings: Settings, store: CoachStore, wait_oura: bool):
+def _slot_clock(value: Any) -> str:
+    text = "" if value is None else str(value).strip()
+    return text[:19] if text else "-"
+
+
+def log_sensor_window(states: dict, settings: Settings) -> None:
+    """Log the Strava slots and Garmin list actually returned, before classification."""
+    for index, slot in enumerate(all_strava_slot_ids(settings.strava_entity_prefix), start=1):
+        activity = states.get(slot.activity)
+        if not activity:
+            log(f"  strava slot {index}: {slot.activity} missing")
+            continue
+        title = str(state_value(activity) or "").strip() or "(empty)"
+        date_state = state_value(states.get(slot.date))
+        attrs = activity.get("attributes") or {}
+        attr_start = attrs.get("start_date_local") or attrs.get("start_date") or attrs.get("date")
+        mismatch = ""
+        if date_state and attr_start and str(date_state)[:10] != str(attr_start)[:10]:
+            mismatch = " DATE MISMATCH"
+        log(
+            f"  strava slot {index}: {title!r} date={_slot_clock(date_state)} "
+            f"attr_start={_slot_clock(attr_start)} id={attrs.get('activity_id')}{mismatch}"
+        )
+    garmin = first_entity(states, GARMIN_LAST_ACTIVITIES, GARMIN_LAST_ACTIVITIES_FALLBACK)
+    raw_list = attr(garmin, "last_activities") or attr(garmin, "activities") or []
+    if not isinstance(raw_list, list):
+        log(f"  garmin last_activities: unreadable ({type(raw_list).__name__})")
+        return
+    newest = raw_list[0] if raw_list and isinstance(raw_list[0], dict) else {}
+    name = newest.get("activityName") or newest.get("activity_name") or newest.get("name") or "-"
+    start = (
+        newest.get("startTimeLocal")
+        or newest.get("startTimeGMT")
+        or newest.get("startTime")
+        or "-"
+    )
+    log(f"  garmin last_activities: {len(raw_list)} items, newest {name!r} {start}")
+
+
+def refresh_sessions(
+    client: HomeAssistantClient,
+    settings: Settings,
+    store: CoachStore,
+) -> None:
+    """Read current Strava/Garmin sensors, upsert, and refresh the share copy."""
+    log("Fetching sessions from HA sensors")
+    ingest(client, settings, store, wait_oura=False, log_slots=True)
+    publish_share_db(store, settings)
+
+
+def ingest(
+    client: HomeAssistantClient,
+    settings: Settings,
+    store: CoachStore,
+    wait_oura: bool,
+    log_slots: bool = False,
+):
     if wait_oura:
         states = wait_for_oura(client, settings)
     else:
         states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
+    if log_slots:
+        log_sensor_window(states, settings)
     live = collect_live_sessions(states, settings)
     store.upsert_sessions(live)
     log_upserted_sessions(live)
@@ -690,31 +785,18 @@ def stdin_loop(
         cmd = line.strip()
         if not cmd:
             continue
-        lower = cmd.lower()
-        if lower == "wipe_db":
-            log("Received wipe_db via stdin; scheduling DuckDB wipe")
-            wipe_requested.set()
-            continue
         try:
-            if cmd.startswith("{") or cmd.startswith("["):
-                payload = json.loads(cmd)
-            elif lower.startswith("set_prefs"):
-                raw = cmd.split(" ", 1)[1] if " " in cmd else "{}"
-                payload = {"cmd": "set_prefs", **json.loads(raw)}
-            elif lower.startswith("checkin"):
-                raw = cmd.split(" ", 1)[1] if " " in cmd else "{}"
-                payload = {"cmd": "checkin", **json.loads(raw)}
-            else:
-                log(f"Unknown stdin command: {cmd!r} (supported: wipe_db, set_prefs, checkin)")
-                continue
+            payload = parse_stdin_line(cmd)
         except json.JSONDecodeError as exc:
             log(f"Invalid stdin JSON: {exc}")
             continue
-        if "cmd" not in payload:
-            if "feeling" in payload or "did_plan" in payload:
-                payload["cmd"] = "checkin"
-            else:
-                payload["cmd"] = "set_prefs"
+        except ValueError as exc:
+            log(str(exc))
+            continue
+        if payload.get("cmd") == "wipe_db":
+            log("Received wipe_db via stdin; scheduling DuckDB wipe")
+            wipe_requested.set()
+            continue
         with lock:
             command_queue.append(payload)
 
@@ -841,6 +923,8 @@ def main() -> None:
                 if cmd == "set_prefs":
                     manager.apply_stdin(payload, now.date())
                     run_once(client, settings, store, manager, wait_oura=False, notify=False)
+                elif cmd == "fetch_sessions":
+                    refresh_sessions(client, settings, store)
                 elif cmd == "checkin":
                     apply_checkin(store, manager, payload, now.date())
                     publish_feedback_sensor(client, store.get_feedback(now.date()))
