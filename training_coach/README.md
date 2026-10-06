@@ -90,7 +90,7 @@ A full copy in the same DuckDB format is written to `/share/training_coach/coach
 
 | Table | What |
 |---|---|
-| `sessions` | Classified workouts (`when_day`, `relative_effort`, `session_load`, **ctl/atl before→after**, splits) |
+| `sessions` | Classified workouts (`when_day`, `relative_effort`, `session_load`, **ctl/atl before→after**, splits, `captured_at`) |
 | `recovery_daily` | Morning recovery snapshot |
 | `decisions` | Published morning plan |
 | `prefs_history` | Race goal + weekly caps over time |
