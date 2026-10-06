@@ -86,6 +86,24 @@ class StoreTests(unittest.TestCase):
         )
         self.assertEqual(session_key(by_title["Gym"]), "title:Gym|2026-09-09")
 
+    def test_captured_at_is_kept_when_session_is_rewritten(self) -> None:
+        session = Session(
+            EASY_RUN, "Easy", "Run", date(2026, 9, 12), activity_id="42", source="strava"
+        )
+        self.store.upsert_sessions([session])
+        captured = self.store._conn.execute(
+            "SELECT captured_at FROM sessions WHERE activity_id = '42'"
+        ).fetchone()[0]
+        self.assertIsNotNone(captured)
+        session.title = "Easy later"
+        session.duration_min = 50
+        self.store.upsert_sessions([session])
+        row = self.store._conn.execute(
+            "SELECT title, captured_at FROM sessions WHERE activity_id = '42'"
+        ).fetchone()
+        self.assertEqual(row[0], "Easy later")
+        self.assertEqual(row[1], captured)
+
     def test_session_banister_marginal_impact(self) -> None:
         """Same-day sessions each move CTL; later one starts from earlier one's after."""
         from datetime import datetime, timezone

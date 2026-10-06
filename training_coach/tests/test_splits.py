@@ -117,6 +117,37 @@ class SplitHistoryTests(unittest.TestCase):
         self.assertTrue(yesterday)
         self.assertEqual(yesterday[0].session_type, INTERVALS)
 
+    def test_same_title_runs_on_different_days_both_kept(self):
+        """Latest splits must not steal the previous Afternoon Run's identity."""
+        states = good_recovery()
+        older = SATURDAY - timedelta(days=2)
+        newer = SATURDAY - timedelta(days=1)
+        add_strava(
+            states, 0, "Afternoon Run", "Run", newer, 35, avg_hr=160, activity_id=20460937038
+        )
+        add_strava(
+            states, 1, "Afternoon Run", "Run", older, 40, avg_hr=155, activity_id=20447786598
+        )
+        states[STRAVA_LATEST_SPLITS] = entity(
+            7,
+            newer,
+            activity_id=20460937038,
+            activity_name="Afternoon Run",
+            activity_type="Run",
+            distance_m=6000,
+            moving_time_s=2100,
+            splits_metric=km_splits(5.8, 4.3, 5.9, 4.2, 5.8, 4.3, 5.7),
+            laps=[],
+        )
+        settings = Settings(timezone="Europe/Helsinki")
+        snap = build_snapshot(states, settings, now=SATURDAY)
+        by_id = {s.activity_id: s for s in snap.sessions}
+        self.assertIn("20460937038", by_id)
+        self.assertIn("20447786598", by_id)
+        self.assertEqual(by_id["20460937038"].when, newer.date())
+        self.assertEqual(by_id["20447786598"].when, older.date())
+        self.assertEqual(by_id["20460937038"].session_type, INTERVALS)
+
     def test_history_adds_older_run_not_in_recent_slots(self):
         states = good_recovery()
         older = SATURDAY - timedelta(days=4)

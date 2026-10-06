@@ -18,7 +18,7 @@ from parse import coerce_date
 from planner import Plan
 from settings import Settings
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 
 def _as_date(value: Any) -> date | None:
@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     ctl_after DOUBLE,
     atl_after DOUBLE,
     tsb_after DOUBLE,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    captured_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS recovery_daily (
@@ -215,6 +216,8 @@ class CoachStore:
         for col in ("ctl_before", "atl_before", "ctl_after", "atl_after", "tsb_after"):
             if col not in session_cols:
                 self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} DOUBLE")
+        if "captured_at" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN captured_at TIMESTAMP")
         feedback_cols = {
             row[1]
             for row in self._conn.execute("PRAGMA table_info('feedback_history')").fetchall()
@@ -265,6 +268,13 @@ class CoachStore:
                 splits_json = json.dumps(session.splits, ensure_ascii=False)
             load = session_load(session)
             session.session_load = load
+            existing = self._conn.execute(
+                "SELECT captured_at FROM sessions WHERE session_key = ?",
+                [key],
+            ).fetchone()
+            # Keep the first time this key was stored. Later upserts and the
+            # CTL/ATL rewrite refresh updated_at only.
+            captured_at = existing[0] if existing is not None else now
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO sessions (
@@ -272,8 +282,8 @@ class CoachStore:
                     started_at, duration_min, distance_m, avg_hr, max_hr, source,
                     splits_json, relative_effort, session_load,
                     ctl_before, atl_before, ctl_after, atl_after, tsb_after,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    updated_at, captured_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     key,
@@ -297,6 +307,7 @@ class CoachStore:
                     session.atl_after,
                     session.tsb_after,
                     now,
+                    captured_at,
                 ],
             )
             count += 1
