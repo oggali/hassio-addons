@@ -226,8 +226,16 @@ def apply_splits_to_sessions(
 
 
 def _match_split(session: Session, split_sets: dict[str, SplitSet]) -> SplitSet | None:
+    """Attach splits only to the same activity.
+
+    Strava reuses titles ("Afternoon Run"). Matching on title copied the latest
+    run's activity id onto the previous one, then merge dropped the newer
+    session as a duplicate.
+    """
     if session.activity_id and session.activity_id in split_sets:
         return split_sets[session.activity_id]
+    if session.activity_id:
+        return None
     title = (session.title or "").lower()
     candidates = []
     for split_set in split_sets.values():
