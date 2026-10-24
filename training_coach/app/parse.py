@@ -141,6 +141,17 @@ def last_updated(entity: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None
     return parse_datetime(entity.get("last_updated") or entity.get("last_changed"), tz)
 
 
+def last_changed(entity: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None:
+    """When the state or attributes last actually changed.
+
+    `last_updated` also moves on a Home Assistant rewrite of the same value.
+    Wake checks use this so a live sensor (body battery, steps) is not a wake.
+    """
+    if not entity:
+        return None
+    return parse_datetime(entity.get("last_changed") or entity.get("last_updated"), tz)
+
+
 def first_entity(states: dict[str, dict[str, Any]] | None, *entity_ids: str) -> dict[str, Any] | None:
     """First available HA state among aliases (prefixed vs older unprefixed IDs)."""
     if not states:

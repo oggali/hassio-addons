@@ -13,9 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from main import (  # noqa: E402
+    MIN_WAKE_WAIT_MINUTES,
     SLEEP_LOG_INTERVAL_S,
     consume_daily_notify,
     morning_slot_passed,
+    morning_wait_deadline,
     next_named_event,
     parse_stdin_line,
     should_fire_named_event,
@@ -97,6 +99,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(should_log_wait(1000 + SLEEP_LOG_INTERVAL_S, 1000, key, key))
         later = (at(20, 30), "evening")
         self.assertTrue(should_log_wait(1000 + 30, 1000, later, key))
+
+    def test_wake_wait_is_at_least_three_hours_after_run_time(self) -> None:
+        now = datetime(2026, 10, 24, 8, 30, tzinfo=TZ)
+        start = datetime(2026, 10, 24, 7, 30, tzinfo=TZ)
+        short = Settings(timezone="Europe/Helsinki", run_time="07:30", oura_wait_minutes=90)
+        self.assertEqual(MIN_WAKE_WAIT_MINUTES, 180)
+        self.assertEqual(morning_wait_deadline(now, short), start + timedelta(minutes=180))
+        longer = Settings(timezone="Europe/Helsinki", run_time="07:30", oura_wait_minutes=240)
+        self.assertEqual(morning_wait_deadline(now, longer), start + timedelta(minutes=240))
 
     def test_consume_daily_notify_once(self) -> None:
         tmp = tempfile.TemporaryDirectory()

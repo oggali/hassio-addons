@@ -121,4 +121,4 @@ Strava distance sensors are treated as kilometres when the number is under 1000,
 
 Strava’s date sensor wins when it disagrees with the activity attribute. The log line is `DATE MISMATCH`.
 
-Entry points: [`session_from_strava_slot`](../app/classify.py#L534-L581), [`session_from_garmin_activity`](../app/classify.py#L599-L651). History is merged in [`collect_live_sessions`](../app/features.py#L445-L471). Garmin’s planned `last_workout` sensor is not read.
+Entry points: [`session_from_strava_slot`](../app/classify.py#L534-L581), [`session_from_garmin_activity`](../app/classify.py#L599-L651). History is merged in [`collect_live_sessions`](../app/features.py#L525-L551). Garmin’s planned `last_workout` sensor is not read.

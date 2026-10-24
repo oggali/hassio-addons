@@ -46,4 +46,4 @@ The long-run floor used by the calendar is [`long_run_floor_km`](../app/load.py#
 
 ## Day activity is separate
 
-Steps, active calories, and intensity minutes are fused from Oura Activity and Garmin daily totals in [`collect_day_activity`](../app/features.py#L381-L417). The fused value is the higher of the two sources. The evening recap prints them. They do not create a session, do not mark the day trained, and do not move CTL. A high step count can still be named in the morning reasons; see [Recovery bands](recovery.md).
+Steps, active calories, and intensity minutes are fused from Oura Activity and Garmin daily totals in [`collect_day_activity`](../app/features.py#L465-L501). The fused value is the higher of the two sources. The evening recap prints them. They do not create a session, do not mark the day trained, and do not move CTL. A high step count can still be named in the morning reasons; see [Recovery bands](recovery.md).

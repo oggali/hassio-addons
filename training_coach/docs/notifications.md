@@ -6,7 +6,7 @@ Telegram (`notify_service`) is always used. Android (`mobile_notify_service`) re
 
 ## Morning
 
-[`notify_plan`](../app/main.py#L447-L466) sends this when the morning slot runs and the add-on is allowed to notify. A startup plan notifies only if `run_time` has already passed and today’s morning notify has not been sent.
+[`notify_plan`](../app/main.py#L479-L498) sends this when the morning slot runs and the add-on is allowed to notify. The slot waits until Oura looks updated today and Garmin has a wake snapshot (see [Recovery bands](recovery.md)). The wait ends at `run_time` plus `oura_wait_minutes`, and not before three hours. After that the plan is sent from Oura, without yesterday’s Garmin sleep score or the in-bed body battery. A startup plan notifies only if `run_time` has already passed and today’s morning notify has not been sent, and that notify uses the same wait.
 
 ```
 Today: Easy run
