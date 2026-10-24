@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -24,9 +24,11 @@ from classify import (  # noqa: E402
     STRENGTH,
     TEMPO,
     Session,
+    classify_logged_session,
     classify_run,
     classify_sport,
     is_training_session,
+    reference_max_hr,
     session_day,
     session_from_garmin_activity,
 )
@@ -220,6 +222,71 @@ class ClassifyTests(unittest.TestCase):
         self.assertAlmostEqual(session.duration_min, 40.008, places=2)
         self.assertEqual(session.session_type, EASY_RUN)
         self.assertEqual(session.activity_id, "g:99")
+
+    def test_reference_max_classifies_steady_run_as_easy(self):
+        # 61 min, avg 148, session peak 159. Against its own peak this is tempo.
+        self.assertEqual(classify_run("Night Run", 60.75, 148.3, 159, 75), TEMPO)
+        self.assertEqual(
+            classify_run("Night Run", 60.75, 148.3, 159, 75, hr_max=195),
+            EASY_RUN,
+        )
+        stored = Session(
+            TEMPO,
+            "Night Run",
+            "Run",
+            date(2026, 10, 22),
+            duration_min=60.75,
+            avg_hr=148.3,
+            max_hr=159,
+        )
+        self.assertEqual(classify_logged_session(stored, 75, 195), EASY_RUN)
+
+    def test_reference_max_tempo_is_not_intervals(self):
+        self.assertEqual(classify_run("Afternoon Run", 40, 170, 189, 75, hr_max=195), TEMPO)
+        self.assertEqual(classify_run("Morning intervals", 40, 150, 190, 75, hr_max=195), INTERVALS)
+
+    def test_reference_max_on_a_ride(self):
+        self.assertEqual(
+            classify_sport("Ride", "Morning Ride", 45, 160, 180, 75, hr_max=195),
+            CROSS_EASY,
+        )
+        self.assertEqual(
+            classify_sport("Ride", "Morning Ride", 50, 170, 188, 75, hr_max=195),
+            CROSS_HARD,
+        )
+
+    def test_reference_max_hr_window(self):
+        today = date(2026, 10, 24)
+
+        def beat(day, max_hr, sport="Run", title="Run"):
+            return Session(
+                EASY_RUN, title, sport, day, duration_min=40, avg_hr=140, max_hr=max_hr
+            )
+
+        value, how = reference_max_hr([beat(today - timedelta(days=10), 180)], today, 195)
+        self.assertEqual((value, how), (195, "setup"))
+
+        value, how = reference_max_hr(
+            [beat(today - timedelta(days=3), 198, "Ride", "Morning Ride")], today, 195
+        )
+        self.assertEqual((value, how), (198, "setup raised by a session max"))
+
+        value, how = reference_max_hr(
+            [
+                beat(today - timedelta(days=200), 210),
+                beat(today - timedelta(days=2), 188),
+            ],
+            today,
+            195,
+        )
+        self.assertEqual((value, how), (188, "rolling 6 months"))
+
+        value, how = reference_max_hr(
+            [beat(today - timedelta(days=1), 250), beat(today - timedelta(days=2), 191)],
+            today,
+            190,
+        )
+        self.assertEqual((value, how), (191, "setup raised by a session max"))
 
     def test_ski_load_exceeds_same_bike(self):
         bike = Session(CROSS_HARD, "intervals", "Ride", SATURDAY.date(), duration_min=60)

@@ -247,6 +247,29 @@ def coaching_note(
     return f"Extra {noun} on a rest day — treat tomorrow as easier if legs feel it."
 
 
+def _format_load_number(value: float) -> str:
+    rounded = round(float(value), 1)
+    if rounded == int(rounded):
+        return str(int(rounded))
+    return f"{rounded:.1f}"
+
+
+def format_load_line(daily: float | None = None, weekly: float | None = None) -> str | None:
+    """Session-load sums for a notification. None omits that side; zero is shown.
+
+    ``weekly`` is the rolling 7 days through today, the same sum as ``load_daily.weekly_load``.
+    The notification labels that sum ``7-day``.
+    """
+    parts: list[str] = []
+    if daily is not None:
+        parts.append(f"today {_format_load_number(daily)}")
+    if weekly is not None:
+        parts.append(f"7-day {_format_load_number(weekly)}")
+    if not parts:
+        return None
+    return "Training load: " + ", ".join(parts) + "."
+
+
 def format_activity_line(activity: DayActivity | None) -> str | None:
     if not activity:
         return None
@@ -291,6 +314,8 @@ def recap_text(
     extras: list[str] | None = None,
     logged_count: int = 0,
     activity: DayActivity | None = None,
+    daily_load: float | None = None,
+    weekly_load: float | None = None,
 ) -> str:
     actual_label = logged_label or (actual.replace("_", " ") if actual else "nothing logged")
     planned_label = planned_type.replace("_", " ") if planned_type else "rest"
@@ -307,6 +332,9 @@ def recap_text(
             logged_count=count,
         ),
     ]
+    load_line = format_load_line(daily=daily_load, weekly=weekly_load)
+    if load_line:
+        lines.append(load_line)
     activity_line = format_activity_line(activity)
     if activity_line:
         lines.append(activity_line)

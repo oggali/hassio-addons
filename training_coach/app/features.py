@@ -268,6 +268,7 @@ def score_recovery(states: dict[str, dict[str, Any]]) -> Recovery:
 def collect_strava_sessions(
     states: dict[str, dict[str, Any]],
     settings: Settings,
+    hr_max: float | None = None,
 ) -> list[Session]:
     sessions: list[Session] = []
     seen: set[tuple] = set()
@@ -282,6 +283,7 @@ def collect_strava_sessions(
             states.get(slot.max_heartrate),
             settings.tz,
             settings.long_run_min_minutes,
+            hr_max=hr_max,
         )
         if not session:
             continue
@@ -341,6 +343,7 @@ def merge_history_sessions(
 def collect_garmin_sessions(
     states: dict[str, dict[str, Any]],
     settings: Settings,
+    hr_max: float | None = None,
 ) -> list[Session]:
     """Completed Garmin activities only — planned `last_workout` is ignored."""
     sessions: list[Session] = []
@@ -354,7 +357,7 @@ def collect_garmin_sessions(
             if not isinstance(item, dict):
                 continue
             session = session_from_garmin_activity(
-                item, settings.tz, settings.long_run_min_minutes
+                item, settings.tz, settings.long_run_min_minutes, hr_max=hr_max
             )
             if not session:
                 continue
@@ -367,6 +370,7 @@ def collect_garmin_sessions(
         first_entity(states, GARMIN_LAST_ACTIVITY, GARMIN_LAST_ACTIVITY_FALLBACK),
         settings.tz,
         settings.long_run_min_minutes,
+        hr_max=hr_max,
     )
     if last and (not last.activity_id or last.activity_id not in seen):
         sessions.append(last)
@@ -443,10 +447,11 @@ def collect_live_sessions(
     settings: Settings,
     history: list[list[dict[str, Any]]] | None = None,
     split_history: list[list[dict[str, Any]]] | None = None,
+    hr_max: float | None = None,
 ) -> list[Session]:
     """Classify sport sessions from Strava and Garmin (never Oura workouts)."""
-    sessions = collect_strava_sessions(states, settings)
-    garmin = collect_garmin_sessions(states, settings)
+    sessions = collect_strava_sessions(states, settings, hr_max=hr_max)
+    garmin = collect_garmin_sessions(states, settings, hr_max=hr_max)
     sessions = merge_training_sessions(sessions, garmin)
     if history:
         sessions = merge_history_sessions(
@@ -459,7 +464,9 @@ def collect_live_sessions(
         settings.tz,
     )
     if split_sets:
-        sessions = apply_splits_to_sessions(sessions, split_sets, settings.long_run_min_minutes)
+        sessions = apply_splits_to_sessions(
+            sessions, split_sets, settings.long_run_min_minutes, hr_max=hr_max
+        )
         sessions = merge_training_sessions(sessions)
     return sessions
 

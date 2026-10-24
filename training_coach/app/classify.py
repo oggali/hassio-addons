@@ -19,6 +19,13 @@ from parse import (
 # Wider than that → separate sessions (e.g. morning + afternoon commute).
 SAME_OUTING_START_WINDOW = timedelta(minutes=45)
 
+# Personal max used as the heart-rate denominator. 183 days is about six months.
+HR_MAX_WINDOW_DAYS = 183
+HR_PLAUSIBLE_MIN = 90.0
+HR_PLAUSIBLE_MAX = 230.0
+# Average at or above this fraction of the reference max is tempo.
+RUN_REFERENCE_TEMPO_RATIO = 0.84
+
 REST = "rest"
 EASY_RUN = "easy_run"
 LONG_RUN = "long_run"
@@ -278,6 +285,49 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(word in text for word in keywords)
 
 
+def _plausible_max_hr(value: float | None) -> float | None:
+    if value is None:
+        return None
+    number = float(value)
+    if number < HR_PLAUSIBLE_MIN or number > HR_PLAUSIBLE_MAX:
+        return None
+    return number
+
+
+def reference_max_hr(
+    sessions: list[Session],
+    today: date,
+    configured: float,
+) -> tuple[float, str]:
+    """Max heart rate used to classify runs and cross-training.
+
+    Once the oldest stored session is at least HR_MAX_WINDOW_DAYS ago, this is
+    the highest plausible max in that window from any sport. Until the store
+    spans that long, it is the configured value, raised when a session max in
+    the window is higher. Readings outside 90–230 bpm are ignored.
+    """
+    configured_peak = _plausible_max_hr(configured) or 190.0
+    dated = [session for session in sessions if session_day(session) is not None]
+    if not dated:
+        return configured_peak, "setup"
+    oldest = min(session_day(session) for session in dated)
+    cutoff = today - timedelta(days=HR_MAX_WINDOW_DAYS)
+    peaks: list[float] = []
+    for session in dated:
+        day = session_day(session)
+        if day is None or day < cutoff:
+            continue
+        peak = _plausible_max_hr(session.max_hr)
+        if peak is not None:
+            peaks.append(peak)
+    observed = max(peaks) if peaks else None
+    if oldest <= cutoff and observed is not None:
+        return observed, "rolling 6 months"
+    if observed is not None and observed > configured_peak:
+        return observed, "setup raised by a session max"
+    return configured_peak, "setup"
+
+
 def classify_run(
     title: str,
     duration_min: float | None,
@@ -285,12 +335,15 @@ def classify_run(
     max_hr: float | None,
     long_run_min_minutes: int,
     splits_hint: str | None = None,
+    hr_max: float | None = None,
 ) -> str:
-    """Title keywords win, then splits, then duration, then HR.
+    """Title keywords win, then splits, then duration, then heart rate.
 
     long_run_min_minutes is the add-on option (default 75). Raise it if 70 min
-    easy runs are being tagged as longs. HR uses avg/max of *this* activity
-    (0.88 ≈ intervals, 0.82 ≈ tempo); lower the ratios if tempo is missed.
+    easy runs are being tagged as longs. When hr_max is set, a run of at least
+    20 minutes whose average is at least RUN_REFERENCE_TEMPO_RATIO of that
+    reference is tempo. Intervals come from the title or splits. When hr_max
+    is omitted, the activity's own max is the denominator.
     """
     blob = _norm(title)
     if _contains_any(blob, INTERVAL_KEYWORDS):
@@ -307,6 +360,15 @@ def classify_run(
         return splits_hint
     if duration_min is not None and duration_min >= long_run_min_minutes:
         return LONG_RUN
+    if hr_max is not None and hr_max > 0:
+        if (
+            avg_hr
+            and duration_min is not None
+            and duration_min >= 20
+            and avg_hr / hr_max >= RUN_REFERENCE_TEMPO_RATIO
+        ):
+            return TEMPO
+        return EASY_RUN
     peak = max_hr or 190.0
     if avg_hr and peak:
         ratio = avg_hr / peak
@@ -324,6 +386,7 @@ def classify_cross(
     avg_hr: float | None,
     max_hr: float | None,
     long_run_min_minutes: int,
+    hr_max: float | None = None,
 ) -> str:
     """Easy / hard / long for bike, nordic ski, and other aerobic cross-training.
 
@@ -342,11 +405,14 @@ def classify_cross(
         if duration_min is not None and duration_min >= long_min:
             return CROSS_EASY_LONG
         return CROSS_EASY
-    peak = max_hr or 185.0
+    if hr_max is not None and hr_max > 0:
+        peak = float(hr_max)
+    else:
+        peak = max_hr or 185.0
     if avg_hr and peak:
-        # Cycling HR is often a bit lower than running at the same RPE.
-        # Short rides need a higher ratio (max spikes inflate avg/max).
-        # 0.84 ≈ clearly hard for mid/long; 0.86 ≈ hard for short.
+        # Ratios are average / reference max when one is passed, otherwise
+        # average / this activity's max. Short efforts use the higher bar.
+        # 0.84 ≈ hard for mid/long; 0.86 ≈ hard for short.
         ratio = avg_hr / peak
         if duration_min is not None and duration_min >= long_min:
             return CROSS_HARD if ratio >= 0.84 else CROSS_EASY_LONG
@@ -370,6 +436,7 @@ def classify_sport(
     avg_hr: float | None,
     max_hr: float | None,
     long_run_min_minutes: int,
+    hr_max: float | None = None,
 ) -> str:
     sport_n = _sport_key(sport)
     title_n = _norm(title)
@@ -377,7 +444,9 @@ def classify_sport(
         return STRENGTH
     is_run = sport_n in RUN_SPORTS or (not sport_n and _looks_like_run(title))
     if is_run:
-        return classify_run(title, duration_min, avg_hr, max_hr, long_run_min_minutes)
+        return classify_run(
+            title, duration_min, avg_hr, max_hr, long_run_min_minutes, hr_max=hr_max
+        )
     if sport_n in ALPINE_SPORTS or sport_n in {
         "walk",
         "walking",
@@ -393,8 +462,68 @@ def classify_sport(
         or is_ski_sport(sport, title)
         or (duration_min is not None and duration_min >= 25 and (avg_hr or max_hr))
     ):
-        return classify_cross(sport, title, duration_min, avg_hr, max_hr, long_run_min_minutes)
+        return classify_cross(
+            sport, title, duration_min, avg_hr, max_hr, long_run_min_minutes, hr_max=hr_max
+        )
     return OTHER
+
+
+def _stored_splits_hint(session: Session) -> str | None:
+    if not session.splits:
+        return None
+    from splits import SplitSet, classify_from_splits
+
+    return classify_from_splits(
+        SplitSet(
+            activity_id=session.activity_id or "",
+            activity_name=session.title or "",
+            activity_type=session.sport or "Run",
+            distance_m=session.distance_m,
+            moving_time_s=(session.duration_min or 0) * 60.0,
+            splits=list(session.splits),
+        )
+    )
+
+
+def classify_logged_session(
+    session: Session,
+    long_run_min_minutes: int,
+    hr_max: float | None,
+) -> str:
+    """Re-read a stored session with the current heart-rate reference.
+
+    Title and stored kilometre splits still win, so an interval workout stays
+    intervals. Strength and rest rows are left as stored.
+    """
+    if session.session_type == REST:
+        return REST
+    sport_n = _sport_key(session.sport or "")
+    if session.session_type == STRENGTH or sport_n in STRENGTH_SPORTS or "weight" in sport_n:
+        return STRENGTH
+    is_run = (
+        session.session_type in RUN_TYPES
+        or sport_n in RUN_SPORTS
+        or (not sport_n and _looks_like_run(session.title or ""))
+    )
+    if is_run and session.session_type not in CROSS_TYPES:
+        return classify_run(
+            session.title or "",
+            session.duration_min,
+            session.avg_hr,
+            session.max_hr,
+            long_run_min_minutes,
+            splits_hint=_stored_splits_hint(session),
+            hr_max=hr_max,
+        )
+    return classify_sport(
+        session.sport or "",
+        session.title or "",
+        session.duration_min,
+        session.avg_hr,
+        session.max_hr,
+        long_run_min_minutes,
+        hr_max=hr_max,
+    )
 
 
 def _looks_like_run(title: str) -> bool:
@@ -412,6 +541,7 @@ def session_from_strava_slot(
     max_hr_entity: dict[str, Any] | None,
     tz,
     long_run_min_minutes: int,
+    hr_max: float | None = None,
 ) -> Session | None:
     title = str(state_value(activity_entity) or "").strip()
     if not title or title.lower() in {"unknown", "unavailable"}:
@@ -434,6 +564,7 @@ def session_from_strava_slot(
         parse_float(state_value(avg_hr_entity)),
         parse_float(state_value(max_hr_entity)),
         long_run_min_minutes,
+        hr_max=hr_max,
     )
     return Session(
         session_type=session_type,
@@ -469,6 +600,7 @@ def session_from_garmin_activity(
     item: dict[str, Any] | None,
     tz,
     long_run_min_minutes: int,
+    hr_max: float | None = None,
 ) -> Session | None:
     if not item:
         return None
@@ -502,6 +634,7 @@ def session_from_garmin_activity(
         parse_float(item.get("averageHR") or item.get("averageHeartRate") or item.get("avgHR")),
         parse_float(item.get("maxHR") or item.get("maxHeartRate")),
         long_run_min_minutes,
+        hr_max=hr_max,
     )
     return Session(
         session_type=session_type,
@@ -522,6 +655,7 @@ def session_from_garmin_entity(
     entity: dict[str, Any] | None,
     tz,
     long_run_min_minutes: int,
+    hr_max: float | None = None,
 ) -> Session | None:
     if not entity:
         return None
@@ -529,7 +663,7 @@ def session_from_garmin_entity(
     title = str(state_value(entity) or "").strip()
     if title and title.lower() not in {"unknown", "unavailable"}:
         attrs.setdefault("activityName", title)
-    return session_from_garmin_activity(attrs, tz, long_run_min_minutes)
+    return session_from_garmin_activity(attrs, tz, long_run_min_minutes, hr_max=hr_max)
 
 
 def session_family(session: Session) -> str:

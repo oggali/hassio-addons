@@ -2,6 +2,8 @@
 
 Private Home Assistant add-on repository (`repository.yaml`, maintainer `@oggali`). Each top-level directory that contains `config.yaml` is one add-on. They do not share a Python package, image, or runtime.
 
+The GitHub landing page is `README.md`. Keep it a catalog: one line per add-on, the store URL, and a pointer here. Add-on behavior stays in that add-on's `README.md`. Training Coach rule detail stays in `training_coach/docs/`.
+
 | Directory | What it is | Tests |
 |---|---|---|
 | `training_coach/` | Morning/evening running coach. Python app under `app/`, DuckDB, HA API. Read `training_coach/AGENTS.md` before editing it. | `training_coach/tests/` |
@@ -30,7 +32,8 @@ Protect `main`: feature branches and PRs, no direct pushes. GitHub merges after 
 
 - Change one add-on per PR unless the task is the shared CI scripts.
 - Keep add-on options in that add-on's `config.yaml` (`options` and `schema`). `run.sh` is what turns those options into the process environment.
-- User-facing behavior belongs in the add-on's `README.md`. Update it when behavior, entities, stdin commands, or config keys change.
+- User-facing overview belongs in the add-on's `README.md`. Training Coach rule detail lives in `training_coach/docs/` and is linked from that README. Update the page that owns the rule when behavior, entities, stdin commands, or config keys change.
+- If the add-on has `AGENTS.md`, update it in the same change when layout, decision rules, schema, or its docs change. That file should say so itself.
 - Defaults in `config.yaml` are this install (Telegram service, Strava entity prefix, Herrfors credentials fields, Ruuvi broker examples). Leave them unless the task is to change them.
 - Tests are `unittest`, not pytest. From the repo root:
 

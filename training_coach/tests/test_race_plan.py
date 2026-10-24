@@ -37,6 +37,7 @@ from feedback import (  # noqa: E402
     coaching_note,
     describe_evening_tomorrow,
     describe_next_session,
+    format_load_line,
     format_logged_label,
     logged_sessions,
     parse_coach_action,
@@ -46,10 +47,11 @@ from feedback import (  # noqa: E402
 )
 from goal import Prefs  # noqa: E402
 from load import build_load_snapshot  # noqa: E402
-from main import handle_mobile_action  # noqa: E402
+from main import handle_mobile_action, notify_plan  # noqa: E402
 from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
 from periodize import build_skeleton  # noqa: E402
-from planner import plan_day  # noqa: E402
+from planner import Plan, plan_day  # noqa: E402
+from recipes import Recipe  # noqa: E402
 from settings import Settings  # noqa: E402
 from simulate import finish_distribution, search_calendar  # noqa: E402
 
@@ -425,6 +427,43 @@ class FeedbackTests(unittest.TestCase):
             activity=activity,
         )
         self.assertIn("Day activity: 11.0k steps, 430 kcal (Garmin + Oura).", text)
+
+    def test_recap_includes_today_and_week_load(self):
+        text = recap_text(
+            "Easy run",
+            EASY_RUN,
+            EASY_RUN,
+            "match",
+            ask_helpers=False,
+            daily_load=24.0,
+            weekly_load=186.4,
+        )
+        self.assertIn("Training load: today 24, 7-day 186.4.", text)
+        self.assertIsNone(format_load_line())
+        self.assertEqual(format_load_line(weekly=0), "Training load: 7-day 0.")
+
+    def test_morning_notify_includes_weekly_load(self):
+        plan = Plan(
+            session_type=EASY_RUN,
+            recipe=Recipe(EASY_RUN, "Easy run", "6–10 km @ 5:50–6:30 /km", 45),
+            why="Recovery is good.",
+            recovery_band="good",
+            yesterday=None,
+            week_counts={},
+            oura_synced_today=True,
+            upcoming=[{"line": "Sun: long run 14–16 km"}],
+        )
+        client = MagicMock()
+        notify_plan(
+            client,
+            Settings(notify_service="notify.tg_oskari", mobile_notify_service=""),
+            plan,
+            weekly_load=186.4,
+        )
+        payload = client.call_service.call_args.args[2]
+        self.assertIn("Training load: 7-day 186.4.", payload["message"])
+        self.assertNotIn("today ", payload["message"])
+        self.assertIn("Upcoming:\nSun: long run 14–16 km", payload["message"])
 
     def test_match_without_calendar_does_not_invent_easy(self):
         note = coaching_note("match", REST, None)

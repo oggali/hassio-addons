@@ -1,6 +1,6 @@
 # Training Coach
 
-Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA, then publishes today's session, a race-goal prediction, and Telegram. Optional Android notifications can repeat the evening message and collect button replies. Physiology and periodization only; not medical advice. User-facing detail is `README.md` — update it when behavior, helpers, sensors, or stdin commands change.
+Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA, then publishes today's session, a race-goal prediction, and Telegram. Optional Android notifications can repeat the evening message and collect button replies. Physiology and periodization only; not medical advice. The operator summary is `README.md`. The rule pages it links to are under `docs/`. Update the README when helpers, sensors, stdin commands, or the summary change. Update the matching `docs/` page when the rule itself changes.
 
 `app/` is a flat script directory, not a package. There is no `__init__.py`. `main.py` and every test insert `app/` on `sys.path` and import modules by filename (`from planner import plan_day`). Keep new modules the same way.
 
@@ -8,7 +8,7 @@ Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA,
 
 | Path | Role |
 |---|---|
-| `config.yaml` | Add-on manifest. Ops options only (timezone, clocks, notify services, Strava prefix, long-run minutes). Race goal and weekly caps are not options: changing options restarts the container. |
+| `config.yaml` | Add-on manifest. Ops options only (timezone, clocks, notify services, Strava prefix, long-run minutes, max heart rate). Race goal and weekly caps are not options: changing options restarts the container. |
 | `build.yaml`, `Dockerfile` | `ghcr.io/hassio-addons/debian-base`, Python 3, `pip install app/requirements.txt` (`requests`, `duckdb`, `websocket-client`). |
 | `run.sh` | `bashio` config → environment variables → `python3 /app/main.py`. |
 | `app/settings.py` | `Settings.from_env()`. Ops knobs only. |
@@ -32,6 +32,22 @@ Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA,
 | `app/persist.py` | Empty shim. Call `CoachStore`, not this module. |
 | `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. |
 | `tests/` | `unittest`. No Home Assistant. Fixture states in `test_planner.py`. |
+| `docs/` | Rule pages linked from `README.md`. Update the page that owns a rule in the same change. |
+
+## Docs
+
+| Page | Owns |
+|---|---|
+| `docs/sessions.md` | Session types, sport routing, reference max heart rate, title/HR/split order, Garmin/Strava merge. |
+| `docs/feedback.md` | Compliance, helper options, Android buttons, what the next plan reads. |
+| `docs/recovery.md` | `poor` / `ok` / `good` votes. |
+| `docs/planning.md` | Quota picker, race skeleton, phases, ladders, paces, Monte Carlo search. |
+| `docs/load.md` | Intensity, CTL / ATL / TSB, running volume, long-run floor. |
+| `docs/notifications.md` | Morning and evening message text, including the training-load lines. |
+
+## Keep this file current
+
+Update this `AGENTS.md` in the same change when you add or rename a module, change a decision rule, change `SCHEMA_VERSION`, or add, rename, or retarget a page under `docs/`. The layout table, the decision-rule list, and the doc index are what the next edit trusts. Line anchors in `docs/` name a function; move the anchor when that function moves.
 
 ## Runtime
 
@@ -45,22 +61,25 @@ Telegram (`notify_service`) is always used. Android (`mobile_notify_service`) is
 
 `run_once` in `main.py`:
 
-1. `ingest` reads `tracked_entity_ids`, classifies Strava + Garmin, upserts sessions. Oura workouts are never read. If the store has never been seeded, history is pulled once.
+1. `ingest` reads `tracked_entity_ids`, classifies Strava + Garmin with the heart-rate reference, upserts sessions, then reclassifies stored rows whose type changes under that reference. Oura workouts are never read. If the store has never been seeded, history is pulled once.
 2. `reconcile_yesterday` upgrades a `skipped` row when a late session showed up.
 3. Prefs sync from helpers. A fingerprint change rebuilds the plan after ~30s, without a notification.
 4. `rebuild_calendar`: load snapshot → paces → `build_skeleton` → `finish_distribution` → `search_calendar` → replace `plan_days`.
 5. `plan_day`. With a race and a row for today, `overlay_calendar`. Otherwise `pick_session_type` (weekly quotas, weekend long-run bias).
-6. Publish `sensor.training_coach_session`, `_summary`, `_goal`, `_feedback`. Persist recovery and the decision. Optionally notify, then copy the database to share.
+6. Publish `sensor.training_coach_session`, `_summary`, `_goal`, `_feedback`. Persist recovery and the decision. Optionally notify (the message includes the rolling 7-day session-load sum), then copy the database to share.
 
 ## Evening path
 
-`run_evening` needs a morning `decisions` row. It stores end-of-day CTL/ATL/TSB, compares the plan with every training session logged today, writes `feedback_history`, and sends Telegram. It does not choose tomorrow's session: recovery is not known yet. If today was hard/long and tomorrow's calendar is hard/long, the copy says morning will switch it. Android on: buttons write helpers and may open one follow-up card (effort, or skip reason). Android off: the Telegram text names the helpers to set by hand. A late session after evening is fixed next morning.
+`run_evening` needs a morning `decisions` row. It stores end-of-day CTL/ATL/TSB, compares the plan with every training session logged today, writes `feedback_history`, and sends Telegram. The recap includes today’s session-load sum and the rolling 7-day sum. It does not choose tomorrow's session: recovery is not known yet. If today was hard/long and tomorrow's calendar is hard/long, the copy says morning will switch it. Android on: buttons write helpers and may open one follow-up card (effort, or skip reason). Android off: the Telegram text names the helpers to set by hand. A late session after evening is fixed next morning.
 
 ## Decision rules that are easy to break
+
+The same rules are written out with thresholds in `docs/`. Change the code and that page together.
 
 Session type constants live in `classify.py`. Use them; do not sprinkle new strings.
 
 - Quality is `intervals` and `tempo` only. `long_run` is taxing but not quality.
+- Heart-rate hardness uses `reference_max_hr`: the highest plausible max (90–230 bpm) in the last 183 days across every sport, once the oldest stored session is at least that old. Until then it is the `max_heart_rate` option, raised when a session max in the window is higher. The option is not rewritten. A run of at least 20 minutes at or above 84% of that reference (`RUN_REFERENCE_TEMPO_RATIO`) is `tempo`. Intervals come from the title or from splits. `ingest` reclassifies stored sessions with `classify_logged_session` so the planner reads the updated type. Callers that omit `hr_max` still divide by the activity’s own max.
 - `HARD_OR_LONG` is quality + `long_run` + `cross_hard` + legacy `cross_long`. `cross_easy` and `cross_easy_long` add load and do not consume `HARD_SPACING_HOURS` (48) or block the next day like a long run.
 - New classify paths emit `cross_easy_long` for a long easy ride/ski. Keep `cross_long` so old rows still gate recovery.
 - Nordic/skate ski minutes are slightly heavier than bike (`SKI_LOAD_BONUS` in `load.py`). Alpine is not aerobic cross-training. Ride and ski kilometres are not running volume and not race-prediction inputs.
