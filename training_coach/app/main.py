@@ -720,7 +720,7 @@ def run_evening(
             body = message
             if i > 0:
                 body = (
-                    "How did that feel?"
+                    "How did you feel today?"
                     if "feel" in pack["tag"]
                     else "Did you follow the plan?"
                 )
