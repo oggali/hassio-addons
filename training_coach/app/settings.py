@@ -33,6 +33,7 @@ class Settings:
     run_immediately: bool = True
     strava_entity_prefix: str = "sensor.strava_oskari_vuorinen"
     long_run_min_minutes: int = 75
+    max_heart_rate: int = 190
     db_path: str = "/data/coach.duckdb"
     share_db_path: str = "/share/training_coach/coach.duckdb"
     share_export_time: str = "23:00"
@@ -72,6 +73,7 @@ class Settings:
                 "STRAVA_ENTITY_PREFIX", "sensor.strava_oskari_vuorinen"
             ),
             long_run_min_minutes=_env_int("LONG_RUN_MIN_MINUTES", 75),
+            max_heart_rate=_env_int("MAX_HEART_RATE", 190),
             db_path=os.environ.get("DB_PATH", "/data/coach.duckdb"),
             share_db_path=os.environ.get("SHARE_DB_PATH", "/share/training_coach/coach.duckdb"),
             share_export_time=os.environ.get("SHARE_EXPORT_TIME", "23:00"),

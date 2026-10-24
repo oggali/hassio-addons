@@ -11,11 +11,11 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(ROOT))
 
-from classify import EASY_RUN, INTERVALS, TEMPO  # noqa: E402
+from classify import EASY_RUN, INTERVALS, TEMPO, Session, classify_logged_session  # noqa: E402
+from splits import SplitSet, apply_splits_to_sessions, classify_from_splits, parse_split_entity  # noqa: E402
 from entities import STRAVA_LATEST_SPLITS  # noqa: E402
 from features import build_snapshot  # noqa: E402
 from settings import Settings  # noqa: E402
-from splits import SplitSet, classify_from_splits, parse_split_entity  # noqa: E402
 from test_planner import SATURDAY, add_strava, entity, good_recovery  # noqa: E402
 
 TZ = ZoneInfo("Europe/Helsinki")
@@ -85,6 +85,46 @@ class SplitClassifyTests(unittest.TestCase):
             splits=km_splits(5.50, 5.45, 5.52, 5.48, 5.50, 5.47),
         )
         self.assertIsNone(classify_from_splits(split_set))
+
+    def test_reference_max_keeps_steady_run_easy_when_splits_attach(self):
+        session = Session(
+            TEMPO,
+            "Night Run",
+            "Run",
+            SATURDAY.date(),
+            duration_min=60.75,
+            avg_hr=148.3,
+            max_hr=159,
+            activity_id="20692272647",
+            distance_m=10270,
+        )
+        split_set = SplitSet(
+            activity_id="20692272647",
+            activity_name="Night Run",
+            activity_type="Run",
+            distance_m=10270,
+            moving_time_s=3645,
+            splits=km_splits(6.05, 6.00, 6.08, 5.98, 6.02, 6.04, 6.01, 5.99, 6.03, 6.02),
+        )
+        updated = apply_splits_to_sessions(
+            [session], {"20692272647": split_set}, 75, hr_max=195
+        )
+        self.assertEqual(updated[0].session_type, EASY_RUN)
+
+    def test_stored_interval_splits_survive_reference_reclassify(self):
+        session = Session(
+            TEMPO,
+            "Afternoon run",
+            "Run",
+            SATURDAY.date(),
+            duration_min=40,
+            avg_hr=150,
+            max_hr=170,
+            activity_id="1",
+            distance_m=7000,
+            splits=km_splits(5.8, 4.3, 5.9, 4.2, 5.8, 4.3, 5.7),
+        )
+        self.assertEqual(classify_logged_session(session, 75, 195), INTERVALS)
 
 
 class SplitHistoryTests(unittest.TestCase):

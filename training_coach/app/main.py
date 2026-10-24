@@ -14,6 +14,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from classify import classify_logged_session, reference_max_hr
 from entities import (
     FEEDBACK_SENSOR,
     GARMIN_LAST_ACTIVITIES,
@@ -32,6 +33,7 @@ from feedback import (
     classify_compliance,
     coaching_note,
     describe_evening_tomorrow,
+    format_load_line,
     format_logged_label,
     logged_sessions,
     parse_coach_action,
@@ -216,7 +218,12 @@ def wait_for_oura(client: HomeAssistantClient, settings: Settings) -> dict:
         time.sleep(max(5, settings.poll_seconds))
 
 
-def seed_history(client: HomeAssistantClient, settings: Settings, store: CoachStore) -> int:
+def seed_history(
+    client: HomeAssistantClient,
+    settings: Settings,
+    store: CoachStore,
+    hr_max: float | None = None,
+) -> int:
     start = datetime.now(settings.tz) - timedelta(days=settings.history_seed_days)
     entity_ids = [
         f"{settings.strava_entity_prefix}_run_date",
@@ -237,7 +244,9 @@ def seed_history(client: HomeAssistantClient, settings: Settings, store: CoachSt
     except Exception as exc:  # noqa: BLE001
         log(f"History seed (splits) failed: {exc}")
     states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
-    sessions = collect_live_sessions(states, settings, history=history, split_history=split_hist)
+    sessions = collect_live_sessions(
+        states, settings, history=history, split_history=split_hist, hr_max=hr_max
+    )
     n = store.upsert_sessions(sessions)
     store.mark_history_seeded()
     log(f"Seeded {n} sessions from HA history ({settings.history_seed_days}d lookback)")
@@ -443,15 +452,23 @@ def notify_message(
             log(f"Mobile notify failed: {exc}")
 
 
-def notify_plan(client: HomeAssistantClient, settings: Settings, plan: Plan) -> None:
+def notify_plan(
+    client: HomeAssistantClient,
+    settings: Settings,
+    plan: Plan,
+    weekly_load: float | None = None,
+) -> None:
     upcoming = ""
     if plan.upcoming:
         upcoming = "\n\nUpcoming:\n" + "\n".join(item.get("line", "") for item in plan.upcoming[:7])
+    load_line = format_load_line(weekly=weekly_load)
+    load_bit = f"\n{load_line}" if load_line else ""
     message = (
         f"Today: {plan.recipe.title}\n"
         f"{plan.recipe.details}\n\n"
         f"Why: {plan.why}\n"
         f"Recovery: {plan.recovery_band}"
+        f"{load_bit}"
         f"{upcoming}"
     )
     notify_message(client, settings, "Training coach", message)
@@ -507,6 +524,31 @@ def refresh_sessions(
     publish_share_db(store, settings)
 
 
+def heart_rate_reference(
+    store: CoachStore,
+    settings: Settings,
+    today: date,
+    extra: list | None = None,
+) -> tuple[float, str]:
+    sessions = store.load_sessions()
+    if extra:
+        sessions = list(sessions) + list(extra)
+    return reference_max_hr(sessions, today, float(settings.max_heart_rate))
+
+
+def reclassify_stored_sessions(store: CoachStore, settings: Settings, hr_max: float) -> int:
+    """Rewrite stored run/cross types when the reference max changes the label."""
+    changed = []
+    for session in store.load_sessions():
+        new_type = classify_logged_session(session, settings.long_run_min_minutes, hr_max)
+        if new_type != session.session_type:
+            session.session_type = new_type
+            changed.append(session)
+    if changed:
+        store.upsert_sessions(changed)
+    return len(changed)
+
+
 def ingest(
     client: HomeAssistantClient,
     settings: Settings,
@@ -520,12 +562,23 @@ def ingest(
         states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
     if log_slots:
         log_sensor_window(states, settings)
-    live = collect_live_sessions(states, settings)
+    today = datetime.now(settings.tz).date()
+    hr_max, _how = heart_rate_reference(store, settings, today)
+    live = collect_live_sessions(states, settings, hr_max=hr_max)
+    hr_live, how_live = heart_rate_reference(store, settings, today, extra=live)
+    if hr_live != hr_max:
+        hr_max, _how = hr_live, how_live
+        live = collect_live_sessions(states, settings, hr_max=hr_max)
     store.upsert_sessions(live)
     log_upserted_sessions(live)
     if store.needs_history_seed():
-        seed_history(client, settings, store)
+        seed_history(client, settings, store, hr_max=hr_max)
         states = client.get_states(tracked_entity_ids(settings.strava_entity_prefix))
+    hr_max, how = heart_rate_reference(store, settings, today)
+    reclassified = reclassify_stored_sessions(store, settings, hr_max)
+    log(f"Heart-rate reference {hr_max:.0f} bpm ({how})")
+    if reclassified:
+        log(f"Reclassified {reclassified} stored sessions with that reference")
     sessions = store.load_sessions()
     snapshot = build_snapshot(states, settings, sessions=sessions)
     return states, snapshot
@@ -644,7 +697,7 @@ def run_once(
     except Exception as exc:  # noqa: BLE001
         log(f"Could not persist coaching facts: {exc}")
     if notify:
-        notify_plan(client, settings, plan)
+        notify_plan(client, settings, plan, weekly_load=load.weekly_load)
         publish_share_db(store, settings)
     log(f"Plan: {plan.session_type} ({plan.recovery_band}) — {plan.why}")
     return plan
@@ -658,10 +711,9 @@ def run_evening(
 ) -> None:
     _, snapshot = ingest(client, settings, store, wait_oura=False)
     # End-of-day Banister snapshot (includes today's logged sessions) for
-    # joining to feedback_history / effort_fit later.
-    store.upsert_load_daily(
-        snapshot.today, build_load_snapshot(snapshot.sessions, snapshot.today)
-    )
+    # joining to feedback_history / effort_fit later, and for the recap.
+    load = build_load_snapshot(snapshot.sessions, snapshot.today)
+    store.upsert_load_daily(snapshot.today, load)
     decision = store.get_decision(snapshot.today)
     if not decision:
         log("No morning plan today; skipping evening check-in")
@@ -712,6 +764,8 @@ def run_evening(
         extras=extras,
         logged_count=len(today_sessions),
         activity=snapshot.activity,
+        daily_load=load.daily_load,
+        weekly_load=load.weekly_load,
     )
     notify_message(client, settings, "Training coach evening", message, android=False, telegram=True)
     if settings.mobile_enabled:
@@ -720,7 +774,7 @@ def run_evening(
             body = message
             if i > 0:
                 body = (
-                    "How did that feel?"
+                    "How did you feel today?"
                     if "feel" in pack["tag"]
                     else "Did you follow the plan?"
                 )

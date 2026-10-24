@@ -172,6 +172,7 @@ def apply_splits_to_sessions(
     sessions: list[Session],
     split_sets: dict[str, SplitSet],
     long_run_min_minutes: int,
+    hr_max: float | None = None,
 ) -> list[Session]:
     """Reclassify known runs using splits; add older split-only runs from history."""
     used_ids: set[str] = set()
@@ -185,7 +186,7 @@ def apply_splits_to_sessions(
         if matched.relative_effort is not None:
             session.relative_effort = matched.relative_effort
         hint = classify_from_splits(matched)
-        session.session_type = _reclassify(session, hint, long_run_min_minutes)
+        session.session_type = _reclassify(session, hint, long_run_min_minutes, hr_max=hr_max)
 
     extras: list[Session] = []
     known = {(s.title.lower(), s.when) for s in sessions}
@@ -207,6 +208,7 @@ def apply_splits_to_sessions(
             None,
             long_run_min_minutes,
             splits_hint=hint,
+            hr_max=hr_max,
         )
         extras.append(
             Session(
@@ -252,7 +254,12 @@ def _match_split(session: Session, split_sets: dict[str, SplitSet]) -> SplitSet 
     return None
 
 
-def _reclassify(session: Session, hint: str | None, long_run_min_minutes: int) -> str:
+def _reclassify(
+    session: Session,
+    hint: str | None,
+    long_run_min_minutes: int,
+    hr_max: float | None = None,
+) -> str:
     from classify import CROSS_TYPES, OTHER, RUN_SPORTS, STRENGTH, classify_run
 
     if session.session_type == STRENGTH:
@@ -269,4 +276,5 @@ def _reclassify(session: Session, hint: str | None, long_run_min_minutes: int) -
         session.max_hr,
         long_run_min_minutes,
         splits_hint=hint,
+        hr_max=hr_max,
     )
