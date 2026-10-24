@@ -50,7 +50,7 @@ Finish-time math follows public race-prediction ideas (Riegel’s formula and a 
 
 ## Morning notification
 
-At `run_time`, Telegram gets today’s session, why, recovery band, the rolling 7-day training-load sum, and the next week. Android gets the same text when `mobile_notify_service` is set. Layout: [Notifications](docs/notifications.md).
+At `run_time`, the add-on waits until Oura has today’s scores and Garmin has a wake snapshot, then Telegram gets today’s session, why, recovery band, the rolling 7-day training-load sum, and the next week. Android gets the same text when `mobile_notify_service` is set. A sleep score left over from yesterday, and body battery while you are still in bed, do not count as awake. Layout: [Notifications](docs/notifications.md). The wake rule is in [Recovery bands](docs/recovery.md).
 
 ## Evening check-in
 
@@ -151,11 +151,11 @@ Use your real add-on slug if it differs. After wipe, the next plan run re-seeds 
 | `timezone` | `Europe/Helsinki` | Used for “today” / weekend |
 | `run_time` | `07:30` | Morning plan time |
 | `evening_time` | `20:30` | Evening recap |
-| `oura_wait_minutes` | `90` | Wait for Oura readiness after `run_time` |
+| `oura_wait_minutes` | `90` | How long after `run_time` to wait for Oura and a Garmin wake. The wait is at least 3 hours. |
 | `poll_seconds` | `60` | Oura wait + helper poll interval |
 | `notify_service` | `notify.tg_oskari` | Telegram (always used, morning and evening) |
 | `mobile_notify_service` | *(empty)* | Optional, e.g. `notify.mobile_app_galaxys26` |
-| `run_immediately_on_start` | `true` | Plan once on startup (no Oura wait). Notifies only if today’s morning slot already passed. |
+| `run_immediately_on_start` | `true` | Plan once on startup. Notifies only if today’s morning slot already passed and that notify was not sent; that notify uses the same wake wait. |
 | `strava_entity_prefix` | `sensor.strava_oskari_vuorinen` | Prefix for recent-activity sensors |
 | `long_run_min_minutes` | `75` | Duration used to classify unlabeled long runs |
 | `max_heart_rate` | `195` | Starting max heart rate for run and cross classification. See [Session categories](docs/sessions.md#reference-heart-rate). |
@@ -168,7 +168,7 @@ Oura recovery: `sensor.oura_ring_readiness_score`, `sensor.oura_ring_sleep_score
 
 Oura activity (not workouts): `sensor.oura_ring_activity_score`, `sensor.oura_ring_steps`, `sensor.oura_ring_active_calories`, `sensor.oura_ring_high_activity_time`, `sensor.oura_ring_medium_activity_time`
 
-Garmin recovery: `sensor.garmin_connect_training_readiness`, `sensor.garmin_connect_morning_training_readiness`, `sensor.garmin_connect_recovery_time`, `sensor.body_battery_most_recent`, `sensor.hrv_status`, `sensor.garmin_connect_hrv_last_night_average`, `sensor.garmin_connect_hrv_baseline`
+Garmin recovery: `sensor.garmin_connect_training_readiness`, `sensor.garmin_connect_morning_training_readiness`, `sensor.sleep_score`, `sensor.garmin_connect_recovery_time`, `sensor.body_battery_most_recent`, `sensor.hrv_status`, `sensor.garmin_connect_hrv_last_night_average`, `sensor.garmin_connect_hrv_baseline`
 
 Garmin sport sessions: `sensor.garmin_connect_last_activity`, `sensor.garmin_connect_last_activities` (planned `last_workout` is ignored)
 

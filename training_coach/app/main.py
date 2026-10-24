@@ -186,6 +186,16 @@ def morning_slot_passed(now: datetime, settings: Settings) -> bool:
     return now >= at_time(now, settings.run_time)
 
 
+# A sleep-in past the 90-minute Oura window still has yesterday's Garmin sleep
+# score. Hold the morning notify at least this long after run_time.
+MIN_WAKE_WAIT_MINUTES = 180
+
+
+def morning_wait_deadline(now: datetime, settings: Settings) -> datetime:
+    minutes = max(settings.oura_wait_minutes, MIN_WAKE_WAIT_MINUTES)
+    return at_time(now, settings.run_time) + timedelta(minutes=minutes)
+
+
 def share_export_slot_passed(now: datetime, settings: Settings) -> bool:
     return now >= at_time(now, settings.share_export_time)
 
@@ -202,19 +212,33 @@ def publish_share_db(store: CoachStore, settings: Settings) -> None:
 
 
 def wait_for_oura(client: HomeAssistantClient, settings: Settings) -> dict:
-    deadline = datetime.now(settings.tz) + timedelta(minutes=settings.oura_wait_minutes)
+    """Poll until Oura has today's scores and Garmin has a wake snapshot.
+
+    Oura's readiness sensor can move while the ring is still on in bed. Garmin
+    keeps yesterday's sleep score until the watch syncs the new night, which is
+    the wake signal. Body battery is not: it drains all night.
+    """
+    deadline = morning_wait_deadline(datetime.now(settings.tz), settings)
     entity_ids = tracked_entity_ids(settings.strava_entity_prefix)
     last_states: dict = {}
     while True:
         last_states = client.get_states(entity_ids)
         snapshot = build_snapshot(last_states, settings)
-        if snapshot.oura_synced_today:
-            log("Oura readiness looks updated for today")
+        if snapshot.oura_synced_today and snapshot.garmin_awake:
+            log("Oura and Garmin morning look updated")
             return last_states
         if datetime.now(settings.tz) >= deadline:
-            log("Timed out waiting for Oura sync; planning with current states")
+            if not snapshot.garmin_awake:
+                log("Timed out waiting for Garmin wake; planning without stale Garmin")
+            else:
+                log("Timed out waiting for Oura sync; planning with current states")
             return last_states
-        log("Waiting for Oura sync...")
+        missing = []
+        if not snapshot.oura_synced_today:
+            missing.append("Oura")
+        if not snapshot.garmin_awake:
+            missing.append("Garmin wake")
+        log(f"Waiting for {' and '.join(missing)}...")
         time.sleep(max(5, settings.poll_seconds))
 
 
@@ -679,6 +703,7 @@ def run_once(
     extra = {
         "oura_readiness": snapshot.recovery.oura_readiness,
         "oura_sleep": snapshot.recovery.oura_sleep,
+        "garmin_awake": snapshot.garmin_awake,
         "reasons": snapshot.recovery.reasons,
         "prefs": prefs.as_dict(),
         "prediction": {k: finish.get(k) for k in ("p10", "p50", "p90", "p_hit", "feasible")},
@@ -1016,7 +1041,7 @@ def main() -> None:
                     log("Morning already notified today; publishing without notify")
             else:
                 log("Morning still ahead; publishing without notify")
-            run_once(client, settings, store, manager, wait_oura=False, notify=notify)
+            run_once(client, settings, store, manager, wait_oura=notify, notify=notify)
             if share_export_slot_passed(datetime.now(settings.tz), settings):
                 publish_share_db(store, settings)
             ran_startup = True

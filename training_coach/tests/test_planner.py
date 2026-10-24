@@ -36,8 +36,11 @@ from entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
     GARMIN_HRV_NIGHT,
+    GARMIN_HRV_STATUS,
     GARMIN_LAST_ACTIVITIES,
     GARMIN_LAST_ACTIVITY,
+    GARMIN_MORNING_READINESS,
+    GARMIN_SLEEP_SCORE,
     GARMIN_TOTAL_STEPS,
     GARMIN_TRAINING_READINESS,
     GARMIN_YESTERDAY_STEPS,
@@ -52,7 +55,7 @@ from entities import (  # noqa: E402
     OURA_TEMP,
     strava_slot_ids,
 )
-from features import build_snapshot  # noqa: E402
+from features import build_snapshot, garmin_is_awake  # noqa: E402
 from load import session_load  # noqa: E402
 from planner import plan_day  # noqa: E402
 from settings import Settings  # noqa: E402
@@ -611,6 +614,72 @@ class PlannerTests(unittest.TestCase):
         plan = self.plan(states, WEDNESDAY)
         self.assertEqual(plan.yesterday, CROSS_EASY)
         self.assertEqual(plan.session_type, INTERVALS)
+
+
+class WakeTests(unittest.TestCase):
+    """24 Oct 2026: Oura had moved, Garmin sleep was still yesterday, user was in bed."""
+
+    def setUp(self):
+        self.settings = Settings(timezone="Europe/Helsinki", run_immediately=False)
+        self.now = datetime(2026, 10, 24, 8, 30, tzinfo=TZ)
+        self.yesterday = self.now - timedelta(days=1)
+
+    def _asleep(self) -> dict:
+        return {
+            OURA_READINESS: entity(62, self.now),
+            OURA_SLEEP: entity(69, self.now),
+            OURA_SLEEP_HRV: entity("unknown", self.now),
+            OURA_HRV_BALANCE: entity(73, self.now),
+            OURA_TEMP: entity(-0.18, self.now),
+            OURA_REST_MODE: entity("off", self.now),
+            GARMIN_TRAINING_READINESS: entity("unknown", self.now),
+            GARMIN_MORNING_READINESS: entity("unknown", self.now),
+            GARMIN_SLEEP_SCORE: entity(55, self.yesterday),
+            GARMIN_BODY_BATTERY: entity(23, self.now),
+            GARMIN_HRV_STATUS: entity("Balanced", self.yesterday),
+            GARMIN_HRV_NIGHT: entity(39, self.yesterday),
+            GARMIN_HRV_BASELINE: entity(35, self.yesterday),
+        }
+
+    def test_stale_garmin_sleep_and_live_body_battery_do_not_force_rest(self):
+        snap = build_snapshot(self._asleep(), self.settings, now=self.now)
+        self.assertTrue(snap.oura_synced_today)
+        self.assertFalse(snap.garmin_awake)
+        self.assertEqual(snap.recovery.band, "ok")
+        text = " ".join(snap.recovery.reasons)
+        self.assertNotIn("Garmin sleep", text)
+        self.assertNotIn("Body battery", text)
+        self.assertIsNone(snap.recovery.garmin_readiness_text)
+
+    def test_morning_readiness_is_the_wake_and_uses_its_sleep_score(self):
+        states = self._asleep()
+        states[GARMIN_MORNING_READINESS] = entity(64, self.now, sleep_score=82)
+        snap = build_snapshot(states, self.settings, now=self.now)
+        self.assertTrue(snap.garmin_awake)
+        text = " ".join(snap.recovery.reasons)
+        self.assertIn("Body battery is low (23)", text)
+        self.assertNotIn("Garmin sleep is low (55)", text)
+        self.assertEqual(snap.recovery.garmin_readiness, 64)
+
+    def test_sleep_score_changed_today_is_a_wake_even_if_the_number_is_low(self):
+        states = self._asleep()
+        states[GARMIN_SLEEP_SCORE] = entity(55, self.now)
+        self.assertTrue(garmin_is_awake(states, TZ, self.now.date()))
+        snap = build_snapshot(states, self.settings, now=self.now)
+        self.assertEqual(snap.recovery.band, "poor")
+        self.assertIn("Garmin sleep is low (55)", snap.recovery.reasons)
+
+    def test_yesterdays_morning_readiness_is_not_a_wake(self):
+        states = self._asleep()
+        states[GARMIN_MORNING_READINESS] = entity(70, self.yesterday, sleep_score=55)
+        self.assertFalse(garmin_is_awake(states, TZ, self.now.date()))
+
+    def test_calendar_date_yesterday_is_not_a_wake(self):
+        states = self._asleep()
+        states[GARMIN_MORNING_READINESS] = entity(
+            70, self.now, calendarDate="2026-10-23", sleep_score=55
+        )
+        self.assertFalse(garmin_is_awake(states, TZ, self.now.date()))
 
 
 if __name__ == "__main__":

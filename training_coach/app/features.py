@@ -54,6 +54,8 @@ from entities import (
 from parse import (
     attr,
     first_entity,
+    is_unavailable,
+    last_changed,
     last_updated,
     parse_bool,
     parse_date,
@@ -136,6 +138,7 @@ class FeatureSnapshot:
     sessions: list[Session]
     oura_synced_today: bool
     already_trained_today: bool
+    garmin_awake: bool = False
     activity: DayActivity = field(default_factory=DayActivity)
 
 
@@ -162,24 +165,99 @@ def _garmin_readiness_score(raw: Any) -> tuple[float | None, str | None]:
     return number, text
 
 
-def score_recovery(states: dict[str, dict[str, Any]]) -> Recovery:
+def _changed_today(entity: dict[str, Any] | None, tz: ZoneInfo, today: date) -> bool:
+    changed = last_changed(entity, tz)
+    return bool(changed and changed.date() == today)
+
+
+def _calendar_date_attr(entity: dict[str, Any] | None, tz: ZoneInfo) -> date | None:
+    """Sleep/readiness day when the integration puts one on the sensor."""
+    if not entity:
+        return None
+    for key in ("calendarDate", "calendar_date", "timestampLocal", "timestamp"):
+        parsed = parse_date(attr(entity, key), tz)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _usable_readiness(states: dict[str, dict[str, Any]]) -> Any:
+    """First Garmin readiness state that is not unknown/unavailable.
+
+    Training readiness is often the string ``unknown`` before the morning
+    snapshot exists. That string is truthy, so it must not hide the morning sensor.
+    """
+    for key in (GARMIN_TRAINING_READINESS, GARMIN_MORNING_READINESS):
+        raw = state_value(states.get(key))
+        if not is_unavailable(raw):
+            return raw
+    return None
+
+
+def garmin_is_awake(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> bool:
+    """True once Garmin has published this morning, not merely a live sensor.
+
+    Morning training readiness is Garmin's after-wakeup snapshot. It counts when
+    that sensor changed today and any ``calendarDate`` on it is today. A new
+    sleep score (``last_changed`` today) counts too: the watch keeps yesterday's
+    number until the new night syncs, which on this install happens at wake.
+    Body battery, steps, and a state of ``unknown`` do not.
+    """
+    morning = states.get(GARMIN_MORNING_READINESS)
+    morning_raw = state_value(morning)
+    if not is_unavailable(morning_raw) and _garmin_readiness_score(morning_raw)[0] is not None:
+        if _changed_today(morning, tz, today):
+            dated = _calendar_date_attr(morning, tz)
+            if dated is None or dated == today:
+                return True
+    sleep = states.get(GARMIN_SLEEP_SCORE)
+    sleep_raw = state_value(sleep)
+    if is_unavailable(sleep_raw) or parse_float(sleep_raw) is None:
+        return False
+    return _changed_today(sleep, tz, today)
+
+
+def garmin_sleep_for_vote(
+    states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date
+) -> float | None:
+    """Today's Garmin sleep score, or None while yesterday's value is still held."""
+    if not garmin_is_awake(states, tz, today):
+        return None
+    morning = states.get(GARMIN_MORNING_READINESS)
+    if _changed_today(morning, tz, today):
+        from_attr = attr(morning, "sleep_score")
+        if not is_unavailable(from_attr):
+            parsed = parse_float(from_attr)
+            if parsed is not None:
+                return parsed
+    sleep = states.get(GARMIN_SLEEP_SCORE)
+    if _changed_today(sleep, tz, today):
+        raw = state_value(sleep)
+        if not is_unavailable(raw):
+            return parse_float(raw)
+    return None
+
+
+def score_recovery(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> Recovery:
     rest_mode = parse_bool(state_value(states.get(OURA_REST_MODE))) or False
     oura_readiness = parse_float(state_value(states.get(OURA_READINESS)))
     oura_sleep = parse_float(state_value(states.get(OURA_SLEEP)))
     oura_hrv = parse_float(state_value(states.get(OURA_SLEEP_HRV)))
     oura_hrv_balance = parse_float(state_value(states.get(OURA_HRV_BALANCE)))
     oura_temp = parse_float(state_value(states.get(OURA_TEMP)))
-    garmin_score, garmin_text = _garmin_readiness_score(
-        state_value(states.get(GARMIN_TRAINING_READINESS))
-        or state_value(states.get(GARMIN_MORNING_READINESS))
-    )
+    awake = garmin_is_awake(states, tz, today)
+    readiness_raw = _usable_readiness(states)
+    if readiness_raw is None:
+        garmin_score, garmin_text = None, None
+    else:
+        garmin_score, garmin_text = _garmin_readiness_score(readiness_raw)
     body_battery = parse_float(state_value(states.get(GARMIN_BODY_BATTERY)))
     recovery_raw = parse_float(state_value(states.get(GARMIN_RECOVERY_TIME)))
     recovery_hours = None
     if recovery_raw is not None:
         recovery_hours = recovery_raw / 60.0 if recovery_raw > 48 else recovery_raw
     hrv_status = state_value(states.get(GARMIN_HRV_STATUS))
-    hrv_status_s = None if hrv_status is None else str(hrv_status)
+    hrv_status_s = None if is_unavailable(hrv_status) else str(hrv_status)
     night = parse_float(state_value(states.get(GARMIN_HRV_NIGHT)))
     baseline = parse_float(state_value(states.get(GARMIN_HRV_BASELINE)))
     hrv_ratio = (night / baseline) if night and baseline else None
@@ -204,10 +282,12 @@ def score_recovery(states: dict[str, dict[str, Any]]) -> Recovery:
 
     vote_score("Oura readiness", oura_readiness, 60, 75)
     vote_score("Oura sleep", oura_sleep, 60, 75)
-    garmin_sleep = parse_float(state_value(states.get(GARMIN_SLEEP_SCORE)))
-    vote_score("Garmin sleep", garmin_sleep, 60, 75)
-    vote_score("Garmin training readiness", garmin_score, 55, 75)
-    vote_score("Body battery", body_battery, 30, 60)
+    # Garmin's preserved sleep score, overnight HRV, and body battery keep
+    # moving or sitting on yesterday until the wake snapshot exists.
+    if awake:
+        vote_score("Garmin sleep", garmin_sleep_for_vote(states, tz, today), 60, 75)
+        vote_score("Garmin training readiness", garmin_score, 55, 75)
+        vote_score("Body battery", body_battery, 30, 60)
 
     if oura_hrv_balance is not None and oura_hrv_balance < 70:
         poor_votes += 1
@@ -215,13 +295,13 @@ def score_recovery(states: dict[str, dict[str, Any]]) -> Recovery:
     elif oura_hrv_balance is not None and oura_hrv_balance >= 80:
         good_votes += 1
 
-    if hrv_ratio is not None and hrv_ratio < 0.9:
+    if awake and hrv_ratio is not None and hrv_ratio < 0.9:
         poor_votes += 1
         reasons.append(f"overnight HRV is below baseline ({hrv_ratio:.2f})")
-    elif hrv_ratio is not None and hrv_ratio >= 1.0:
+    elif awake and hrv_ratio is not None and hrv_ratio >= 1.0:
         good_votes += 1
 
-    if hrv_status_s and hrv_status_s.lower() in {"unbalanced", "low", "poor"}:
+    if awake and hrv_status_s and hrv_status_s.lower() in {"unbalanced", "low", "poor"}:
         poor_votes += 1
         reasons.append(f"Garmin HRV status is {hrv_status_s}")
 
@@ -229,10 +309,10 @@ def score_recovery(states: dict[str, dict[str, Any]]) -> Recovery:
         poor_votes += 1
         reasons.append(f"temperature deviation is {oura_temp:g}°C")
 
-    if recovery_hours is not None and recovery_hours >= 24:
+    if awake and recovery_hours is not None and recovery_hours >= 24:
         poor_votes += 1
         reasons.append(f"Garmin still wants {recovery_hours:.0f}h recovery")
-    elif recovery_hours is not None and recovery_hours <= 8:
+    elif awake and recovery_hours is not None and recovery_hours <= 8:
         good_votes += 1
 
     if rest_mode or poor_votes >= 2 or (oura_readiness is not None and oura_readiness < 55):
@@ -481,7 +561,7 @@ def build_snapshot(
 ) -> FeatureSnapshot:
     now = now or datetime.now(settings.tz)
     today = now.date()
-    recovery = score_recovery(states)
+    recovery = score_recovery(states, settings.tz, today)
     activity = collect_day_activity(states)
     add_activity_reasons(recovery, activity)
     if sessions is None:
@@ -504,6 +584,7 @@ def build_snapshot(
         sessions=sessions,
         oura_synced_today=oura_is_synced_today(states, settings.tz, today),
         already_trained_today=already,
+        garmin_awake=garmin_is_awake(states, settings.tz, today),
         activity=activity,
     )
 
