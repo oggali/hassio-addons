@@ -26,7 +26,31 @@ On a pull request to `main`:
 
 Version strings are calendar dates: `YYYY.MM.DD` for the first release that day, `YYYY.MM.DD.N` when a later release is needed the same day (`N` starts at `1`). Bump `version` in the same change as the add-on edit. Leave other add-ons' versions alone.
 
-Protect `main`: feature branches and PRs, no direct pushes. GitHub merges after CI passes.
+## Commits and pull requests
+
+Work on a feature branch (`feature/…`, `fix/…`, or `refactor/…`). Do not commit or push to `main` or `dev`. A `feat` commit uses a `feature/` branch.
+
+One add-on per branch, unless the change is the shared CI scripts. The commit includes:
+
+- the add-on edit
+- that add-on's `version` bump in `config.yaml`
+- the README, `docs/`, or `AGENTS.md` update when behavior, entities, stdin commands, config keys, layout, or decision rules change
+
+Commit subjects follow [Conventional Commit Messages](https://gist.github.com/qoomon/5dfcdf8eec66a051ecd85625518cfd13):
+
+```text
+<type>(<scope>): <description>
+```
+
+`type` is `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, or `chore`. `scope` is the area inside the add-on, such as `notification` or `session`. For the shared CI scripts, use `ops(ci)`. Description is imperative present tense, lowercase, and has no final period: `fix(notification): keep the evening recap when the plan is missing`. Add a body when the reason is not obvious from that line. Mark a breaking change with `!` before the colon and a `BREAKING CHANGE:` footer. The type does not change the calendar `version` in `config.yaml`.
+
+Use that same subject as the pull request title. The title and body become the GitHub Release notes, so write the body for someone reading the release.
+
+Do not commit `__pycache__`, virtualenvs, `.env`, DuckDB files, or `herrfors_selenium/tmp_tests/`.
+
+When the user asks to commit, and the current branch is `main` or `dev`, create the feature branch first and commit there. If the work is already on a feature branch, stay on it.
+
+Then push that branch and open a pull request to `main`. No workflow creates the pull request. After it is open, enable auto-merge as a merge commit so `addon-tag.yml` receives `merge_commit_sha`. GitHub merges it once `addon-ci.yml` passes. These workflows do not merge it. After that merge, `addon-tag.yml` tags `<dirname>/<version>` and opens the GitHub Release. That step is automatic.
 
 ## How to work here
 
@@ -43,5 +67,4 @@ python3 .github/scripts/test_addon_ci.py -v
 ```
 
 - `training_coach` tests need `duckdb`, `requests`, and `websocket-client` (`training_coach/app/requirements.txt`). CI installs that file into a fresh venv; locally, install it yourself if imports fail.
-- Do not commit `__pycache__`, virtualenvs, `.env`, DuckDB files, or `herrfors_selenium/tmp_tests/`.
 - Do not add a shared library between add-ons. Copy a helper only if both sides truly need it, and say so in the PR.
