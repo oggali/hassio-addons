@@ -4,9 +4,11 @@
 
 Telegram (`notify_service`) is always used. Android (`mobile_notify_service`) receives the morning message when that service is set. The evening recap goes to Telegram; the phone gets the same recap on the first card, then short follow-up cards. Categories and buttons are in [Evening feedback](feedback.md). The load numbers are in [Training load](load.md).
 
+[`notify_message`](../app/main.py#L450-L482) sets `data.parse_mode` to `plain_text` on every Telegram send. The legacy notify platform forwards that to `telegram_bot.send_message`. Without it, the bot’s default parser is legacy Markdown, where `_` starts italics. `same_family` in the evening recap, and helper entity ids when Android is off, have no closing `_`, so Telegram rejects the message and nothing is delivered. Android cards do not set a parse mode.
+
 ## Morning
 
-[`notify_plan`](../app/main.py#L479-L498) sends this when the morning slot runs and the add-on is allowed to notify. The slot waits until Oura looks updated today and Garmin has a wake snapshot (see [Recovery bands](recovery.md)). The wait ends at `run_time` plus `oura_wait_minutes`, and not before three hours. After that the plan is sent from Oura, without yesterday’s Garmin sleep score or the in-bed body battery. A startup plan notifies only if `run_time` has already passed and today’s morning notify has not been sent, and that notify uses the same wait.
+[`notify_plan`](../app/main.py#L485-L504) sends this when the morning slot runs and the add-on is allowed to notify. The slot waits until Oura looks updated today and Garmin has a wake snapshot (see [Recovery bands](recovery.md)). The wait ends at `run_time` plus `oura_wait_minutes`, and not before three hours. After that the plan is sent from Oura, without yesterday’s Garmin sleep score or the in-bed body battery. A startup plan notifies only if `run_time` has already passed and today’s morning notify has not been sent, and that notify uses the same wait.
 
 ```
 Today: Easy run
@@ -26,7 +28,7 @@ The upcoming block is the next seven calendar rows. Without a race, those rows a
 
 ## Evening
 
-[`recap_text`](../app/feedback.py#L305-L353) builds the Telegram message and the first Android card ([`run_evening`](../app/main.py#L712-L726)):
+[`recap_text`](../app/feedback.py#L305-L353) builds the Telegram message and the first Android card ([`run_evening`](../app/main.py#L787-L820)):
 
 ```
 This morning: Easy run

@@ -55,7 +55,7 @@ Update this `AGENTS.md` in the same change when you add or rename a module, chan
 
 Stdin (`hassio.addon_stdin`): `wipe_db`, `fetch_sessions`, `set_prefs`, `checkin`. JSON objects are accepted; a body with `feeling` or `did_plan` and no `cmd` is a check-in, otherwise `set_prefs`. `wipe_db` deletes the live database and re-seeds history (365 days) on the next plan. `fetch_sessions` upserts current sensors and refreshes the share copy; it does not notify or rebuild the plan.
 
-Telegram (`notify_service`) is always used. Android (`mobile_notify_service`) is optional. Empty, `null`, `none`, `unknown`, or `false` disables it and the websocket listener.
+Telegram (`notify_service`) is always used. Each Telegram send sets `data.parse_mode` to `plain_text`. The bot default is legacy Markdown, and an unmatched `_` (as in `same_family`) makes Telegram reject the message. Android (`mobile_notify_service`) is optional. Empty, `null`, `none`, `unknown`, or `false` disables it and the websocket listener.
 
 ## Morning path
 

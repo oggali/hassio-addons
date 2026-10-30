@@ -47,7 +47,7 @@ from feedback import (  # noqa: E402
 )
 from goal import Prefs  # noqa: E402
 from load import build_load_snapshot  # noqa: E402
-from main import handle_mobile_action, notify_plan  # noqa: E402
+from main import handle_mobile_action, notify_message, notify_plan  # noqa: E402
 from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
 from periodize import build_skeleton  # noqa: E402
 from planner import Plan, plan_day  # noqa: E402
@@ -464,6 +464,25 @@ class FeedbackTests(unittest.TestCase):
         self.assertIn("Training load: 7-day 186.4.", payload["message"])
         self.assertNotIn("today ", payload["message"])
         self.assertIn("Upcoming:\nSun: long run 14–16 km", payload["message"])
+        self.assertEqual(payload["data"], {"parse_mode": "plain_text"})
+
+    def test_telegram_plain_text_does_not_change_android_data(self):
+        client = MagicMock()
+        android_data = {"tag": "checkin", "actions": [], "sticky": True}
+        notify_message(
+            client,
+            Settings(
+                notify_service="notify.tg_oskari",
+                mobile_notify_service="notify.mobile_app_galaxys26",
+            ),
+            "Training coach evening",
+            "Logged: tempo run (planned intervals → same_family).",
+            android_data=android_data,
+        )
+        calls = {call.args[1]: call.args[2] for call in client.call_service.call_args_list}
+        self.assertEqual(calls["tg_oskari"]["data"], {"parse_mode": "plain_text"})
+        self.assertEqual(calls["mobile_app_galaxys26"]["data"], android_data)
+        self.assertNotIn("parse_mode", calls["mobile_app_galaxys26"])
 
     def test_match_without_calendar_does_not_invent_easy(self):
         note = coaching_note("match", REST, None)

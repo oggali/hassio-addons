@@ -459,8 +459,14 @@ def notify_message(
 ) -> None:
     if telegram:
         domain, service = settings.notify_domain_service
+        # Legacy Markdown treats an unmatched "_" as italics and rejects the send.
+        payload = {
+            "message": message,
+            "title": title,
+            "data": {"parse_mode": "plain_text"},
+        }
         try:
-            client.call_service(domain, service, {"message": message, "title": title})
+            client.call_service(domain, service, payload)
             log(f"Notified via {domain}.{service}")
         except Exception as exc:  # noqa: BLE001
             log(f"Notify failed: {exc}")
