@@ -1,0 +1,63 @@
+# A push to feature/**, fix/**, or refactor/** opens a pull request to main
+# and enables auto-merge as a merge commit. addon-ci.yml still runs on that PR.
+# addon-tag.yml tags after the merge.
+#
+# A pull request opened with the default GITHUB_TOKEN leaves Add-on CI waiting
+# for "Approve workflows to run". Set the repo secret PR_OPEN_TOKEN to a
+# personal access token or GitHub App token with contents and pull requests
+# write so CI starts on its own. Also allow auto-merge, and allow Actions to
+# create pull requests.
+name: Add-on pull request
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "fix/**"
+      - "refactor/**"
+
+concurrency:
+  group: addon-pr-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PR_OPEN_TOKEN || github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Open pull request and enable auto-merge
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          number="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number')"
+          if [ -z "$number" ]; then
+            git log --reverse --no-merges --format='%s' origin/main..HEAD > "$RUNNER_TEMP/subjects.txt"
+            title="$(head -n 1 "$RUNNER_TEMP/subjects.txt" || true)"
+            if [ -z "$title" ]; then
+              title="$BRANCH"
+            fi
+            git log --reverse --no-merges --format='%s%n%n%b' origin/main..HEAD > "$RUNNER_TEMP/pr-body.txt"
+            if [ ! -s "$RUNNER_TEMP/pr-body.txt" ]; then
+              printf '%s\n' "$title" > "$RUNNER_TEMP/pr-body.txt"
+            fi
+            url="$(gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/pr-body.txt")"
+            echo "Opened $url"
+            number="${url##*/}"
+          else
+            echo "Pull request #$number is already open"
+          fi
+          gh pr merge "$number" --auto --merge
