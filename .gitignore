@@ -1,5 +1,6 @@
 # --- Project specific ---
 /herrfors_selenium/tmp_tests/
+.cursor/
 
 # --- Python ---
 __pycache__/

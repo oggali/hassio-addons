@@ -9,13 +9,15 @@ The GitHub landing page is `README.md`. Keep it a catalog: one line per add-on, 
 | `training_coach/` | Morning/evening running coach. Python app under `app/`, DuckDB, HA API. Read `training_coach/AGENTS.md` before editing it. | `training_coach/tests/` |
 | `ruuvibridge/` | Thin wrapper around the upstream [RuuviBridge](https://github.com/Scrin/RuuviBridge) binary. Config is rendered to `/data/config.yml` by `run.sh`. | none |
 | `herrfors_selenium/` | Headless Chromium login that refreshes a Herrfors session token. Python under `app/` (`main.py`, `herrfors_session.py`, `refresh_server.py`, `decode_encode_token.py`). | none |
-| `.github/` | PR gate and post-merge tagging. `scripts/addon_ci.py` discovers add-ons, checks versions, runs tests, tags releases. | `scripts/test_addon_ci.py` |
+| `.github/` | Opens a pull request on `feature/` `fix/` `refactor/` pushes, then the PR gate and post-merge tagging. `scripts/addon_ci.py` discovers add-ons, checks versions, runs tests, tags releases. | `scripts/test_addon_ci.py` |
 
 `ruuvibridge/.github/workflows/build.yml` builds that add-on image on its own. New add-ons do not copy that workflow. Releases for this repo are git tags from `.github/workflows/addon-tag.yml`.
 
 ## Version and CI
 
 Any file under an add-on directory counts as a change to that add-on, including README and this kind of agent note.
+
+A push to `feature/**`, `fix/**`, or `refactor/**` runs `addon-pr.yml`. It opens a pull request to `main` when none is open, and enables auto-merge as a merge commit. Later pushes to that branch update the same pull request.
 
 On a pull request to `main`:
 
@@ -28,29 +30,13 @@ Version strings are calendar dates: `YYYY.MM.DD` for the first release that day,
 
 ## Commits and pull requests
 
-Work on a feature branch (`feature/…`, `fix/…`, or `refactor/…`). Do not commit or push to `main` or `dev`. A `feat` commit uses a `feature/` branch.
+The skill `git-commit-pr` creates the branch and writes the conventional commit. Push that branch and stop. `addon-pr.yml` opens the pull request. Do not open a second one with `gh`. In this repo:
 
-One add-on per branch, unless the change is the shared CI scripts. The commit includes:
-
-- the add-on edit
-- that add-on's `version` bump in `config.yaml`
-- the README, `docs/`, or `AGENTS.md` update when behavior, entities, stdin commands, config keys, layout, or decision rules change
-
-Commit subjects follow [Conventional Commit Messages](https://gist.github.com/qoomon/5dfcdf8eec66a051ecd85625518cfd13):
-
-```text
-<type>(<scope>): <description>
-```
-
-`type` is `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, or `chore`. `scope` is the area inside the add-on, such as `notification` or `session`. For the shared CI scripts, use `ops(ci)`. Description is imperative present tense, lowercase, and has no final period: `fix(notification): keep the evening recap when the plan is missing`. Add a body when the reason is not obvious from that line. Mark a breaking change with `!` before the colon and a `BREAKING CHANGE:` footer. The type does not change the calendar `version` in `config.yaml`.
-
-Use that same subject as the pull request title. The title and body become the GitHub Release notes, so write the body for someone reading the release.
-
-Do not commit `__pycache__`, virtualenvs, `.env`, DuckDB files, or `herrfors_selenium/tmp_tests/`.
-
-When the user asks to commit, and the current branch is `main` or `dev`, create the feature branch first and commit there. If the work is already on a feature branch, stay on it.
-
-Then push that branch and open a pull request to `main`. No workflow creates the pull request. After it is open, enable auto-merge as a merge commit so `addon-tag.yml` receives `merge_commit_sha`. GitHub merges it once `addon-ci.yml` passes. These workflows do not merge it. After that merge, `addon-tag.yml` tags `<dirname>/<version>` and opens the GitHub Release. That step is automatic.
+- One add-on per branch, unless the change is the shared CI scripts. The commit includes the add-on edit, that add-on's `version` bump in `config.yaml`, and the README, `docs/`, or `AGENTS.md` update when behavior, entities, stdin commands, config keys, layout, or decision rules change.
+- `scope` is the area inside the add-on, such as `notification` or `session`. Shared CI scripts use `ops(ci)`. The commit type does not change the calendar `version`.
+- `addon-pr.yml` titles the pull request with the first commit subject on the branch and uses the commit log as the body. Those become the GitHub Release notes, so write the commits for someone reading the release.
+- Do not commit `__pycache__`, virtualenvs, `.env`, DuckDB files, or `herrfors_selenium/tmp_tests/`.
+- Auto-merge must stay a merge commit so `addon-tag.yml` receives `merge_commit_sha`. After that merge, the workflow tags `<dirname>/<version>` and opens the GitHub Release.
 
 ## How to work here
 
