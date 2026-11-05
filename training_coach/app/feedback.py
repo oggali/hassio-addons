@@ -389,7 +389,7 @@ def _effort_followup(day: date, clear_tag: str) -> list[dict]:
     return [
         {"message": "clear_notification", "android_data": {"tag": clear_tag}},
         {
-            "message": "Was the session too easy, about right, or too hard?",
+            "message": "Was the session which you did too easy, about right, or too hard?",
             "android_data": {
                 "tag": pack["tag"],
                 "actions": pack["actions"],
