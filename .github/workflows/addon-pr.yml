@@ -1,12 +1,12 @@
 # A push to feature/**, fix/**, or refactor/** opens a pull request to main
 # and enables auto-merge as a merge commit. addon-ci.yml still runs on that PR.
-# addon-tag.yml tags after the merge.
+# After CI succeeds it dispatches addon-tag.yml, which waits for this merge.
 #
-# A pull request opened with the default GITHUB_TOKEN leaves Add-on CI waiting
-# for "Approve workflows to run". Set the repo secret PR_OPEN_TOKEN to a
+# A pull request opened with the default GITHUB_TOKEN can leave Add-on CI
+# waiting for "Approve workflows to run". Set the repo secret PR_OPEN_TOKEN to a
 # personal access token or GitHub App token with contents and pull requests
-# write so CI starts on its own. Also allow auto-merge, and allow Actions to
-# create pull requests.
+# write so CI starts on its own. Tagging does not need that secret. Also allow
+# auto-merge, and allow Actions to create pull requests.
 name: Add-on pull request
 
 on:

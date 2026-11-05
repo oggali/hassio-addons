@@ -9,7 +9,13 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from addon_ci import Addon, addon_for_path, parse_top_field  # noqa: E402
+from addon_ci import (  # noqa: E402
+    Addon,
+    addon_for_path,
+    closed_without_merge,
+    merged_release_env,
+    parse_top_field,
+)
 
 
 class ParseTopFieldTests(unittest.TestCase):
@@ -55,6 +61,35 @@ class AddonPathTests(unittest.TestCase):
 
     def test_does_not_match_prefix_of_other_name(self) -> None:
         self.assertIsNone(addon_for_path("training_coach_extra/foo", self.addons))
+
+
+class MergedReleaseEnvTests(unittest.TestCase):
+    def test_open_pull_request_waits(self) -> None:
+        payload = {"state": "OPEN", "number": 14, "title": "fix", "mergedAt": None, "mergeCommit": None}
+        self.assertIsNone(merged_release_env(payload))
+        self.assertFalse(closed_without_merge(payload))
+
+    def test_merged_pull_request_uses_merge_commit(self) -> None:
+        payload = {
+            "state": "MERGED",
+            "number": 14,
+            "title": "fix(notification): point the effort card at the session they did",
+            "body": "notes",
+            "url": "https://github.com/oggali/hassio-addons/pull/14",
+            "mergedAt": "2026-11-05T19:54:23Z",
+            "mergeCommit": {"oid": "a7a180ee47c14fe9be57350e41a6aa0dd855000f"},
+        }
+        env = merged_release_env(payload)
+        assert env is not None
+        self.assertEqual(env["HEAD_SHA"], payload["mergeCommit"]["oid"])
+        self.assertEqual(env["PR_NUMBER"], "14")
+        self.assertEqual(env["PR_TITLE"], payload["title"])
+        self.assertFalse(closed_without_merge(payload))
+
+    def test_closed_without_merge_is_skipped(self) -> None:
+        payload = {"state": "CLOSED", "mergedAt": None, "mergeCommit": None}
+        self.assertIsNone(merged_release_env(payload))
+        self.assertTrue(closed_without_merge(payload))
 
 
 class DiscoverAddonsTests(unittest.TestCase):

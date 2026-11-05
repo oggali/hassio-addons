@@ -24,7 +24,7 @@ On a pull request to `main`:
 1. `addon-ci.yml` runs `python3 .github/scripts/test_addon_ci.py -v`, then `addon_ci.py check`, then `addon_ci.py test`.
 2. `check` requires the add-on's `version` in `config.yaml` to differ from `main`, and the tag `<dirname>/<version>` to be unused. Example tags: `training_coach/2026.10.06`, `ruuvibridge/2026.10.05.1`.
 3. `test` creates a venv and runs `unittest discover` only for changed add-ons that have a `tests/` directory.
-4. After the PR is merged, `addon-tag.yml` tags that version and opens a GitHub Release. The release notes are the PR title and body.
+4. After Add-on CI succeeds, it dispatches `addon-tag.yml`. That run waits for the merge commit, tags `<dirname>/<version>`, and opens a GitHub Release. A merge by `github-actions[bot]` does not emit `pull_request` `closed`, so the dispatch is what starts tagging. A merge by a person still starts the same workflow from `closed`. The release notes are the PR title and body.
 
 Version strings are calendar dates: `YYYY.MM.DD` for the first release that day, `YYYY.MM.DD.N` when a later release is needed the same day (`N` starts at `1`). Bump `version` in the same change as the add-on edit. Leave other add-ons' versions alone.
 
@@ -36,7 +36,7 @@ The skill `git-commit-pr` creates the branch and writes the conventional commit.
 - `scope` is the area inside the add-on, such as `notification` or `session`. Shared CI scripts use `ops(ci)`. The commit type does not change the calendar `version`.
 - `addon-pr.yml` titles the pull request with the first commit subject on the branch and uses the commit log as the body. Those become the GitHub Release notes, so write the commits for someone reading the release.
 - Do not commit `__pycache__`, virtualenvs, `.env`, DuckDB files, or `herrfors_selenium/tmp_tests/`.
-- Auto-merge must stay a merge commit so `addon-tag.yml` receives `merge_commit_sha`. After that merge, the workflow tags `<dirname>/<version>` and opens the GitHub Release.
+- Auto-merge stays a merge commit. `addon-tag.yml` tags `<dirname>/<version>` on that commit and opens the GitHub Release. Add-on CI dispatches that workflow because a merge by `github-actions[bot]` does not start a `pull_request` `closed` workflow.
 
 ## How to work here
 

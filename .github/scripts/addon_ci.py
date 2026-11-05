@@ -280,6 +280,27 @@ def cmd_test() -> int:
     return 0
 
 
+def merged_release_env(payload: dict) -> dict[str, str] | None:
+    """Tag inputs for a merged pull request. None while it is still open or unmerged."""
+    merged_at = payload.get("mergedAt")
+    oid = str((payload.get("mergeCommit") or {}).get("oid") or "")
+    if not merged_at or not oid:
+        return None
+    number = payload.get("number")
+    return {
+        "HEAD_SHA": oid,
+        "PR_NUMBER": "" if number is None else str(number),
+        "PR_TITLE": str(payload.get("title") or ""),
+        "PR_BODY": str(payload.get("body") or ""),
+        "PR_URL": str(payload.get("url") or ""),
+    }
+
+
+def closed_without_merge(payload: dict) -> bool:
+    state = str(payload.get("state") or "").upper()
+    return state == "CLOSED" and not payload.get("mergedAt")
+
+
 def release_notes(addon: Addon) -> str:
     title = os.environ.get("PR_TITLE", "").strip() or addon.tag
     body = os.environ.get("PR_BODY", "").strip()
