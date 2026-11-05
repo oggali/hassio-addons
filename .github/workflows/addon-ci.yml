@@ -1,6 +1,9 @@
 # PR gate for the add-on monorepo.
 # Protect main so this workflow is required: feature branches only, no direct pushes.
-# GitHub (not this workflow) merges the PR after checks pass. Tagging is addon-tag.yml.
+# GitHub (not this workflow) merges the PR after checks pass. A successful run
+# dispatches addon-tag.yml. A merge by the Actions token does not emit
+# pull_request closed, and workflow_dispatch is the event that token is allowed
+# to start.
 name: Add-on CI
 
 on:
@@ -12,6 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: write
   contents: read
   pull-requests: read
 
@@ -40,3 +44,15 @@ jobs:
 
       - name: Run add-on tests
         run: python3 .github/scripts/addon_ci.py test
+
+      - name: Start add-on tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git grep -q 'workflow_dispatch:' origin/main:.github/workflows/addon-tag.yml; then
+            echo "Add-on tag on main has no workflow_dispatch yet."
+            exit 0
+          fi
+          gh workflow run addon-tag.yml --ref main -f pr_number="${{ github.event.pull_request.number }}"

@@ -1,14 +1,25 @@
-# After a PR is merged to main, tag each changed add-on as <folder>/<version>
-# from that add-on's config.yaml and create a GitHub Release.
+# Tag each changed add-on as <folder>/<version> on the merge commit and open a
+# GitHub Release.
+#
+# A merge by github-actions[bot] does not emit pull_request closed, so Add-on CI
+# dispatches this workflow. The dispatch starts before auto-merge finishes, and
+# the job waits for the merge commit. A merge by a person still arrives as
+# pull_request closed.
 name: Add-on tag
 
 on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
 
 concurrency:
-  group: addon-tag-${{ github.event.pull_request.number }}
+  group: addon-tag-${{ github.event.pull_request.number || inputs.pr_number }}
 
 permissions:
   contents: write
@@ -16,25 +27,85 @@ permissions:
 
 jobs:
   tag:
-    if: github.event.pull_request.merged == true && github.event.pull_request.merge_commit_sha != ''
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && github.event.pull_request.merge_commit_sha != '')
     runs-on: ubuntu-latest
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_SHA: ${{ github.event.pull_request.merge_commit_sha }}
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
       PR_URL: ${{ github.event.pull_request.html_url }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout merge commit
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
-      - name: Fetch main history
-        run: git fetch origin "${{ github.event.pull_request.base.ref }}"
+      - name: Wait for the merge commit
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python3 - << 'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+
+          sys.path.insert(0, ".github/scripts")
+          from addon_ci import closed_without_merge, merged_release_env
+
+          pr = os.environ["PR_NUMBER"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          env_path = os.environ["GITHUB_ENV"]
+
+          def write_env(values: dict[str, str]) -> None:
+              with open(env_path, "a", encoding="utf-8") as handle:
+                  for key, value in values.items():
+                      handle.write(f"{key}<<ADDON_TAG_ENV_EOF\n{value}\nADDON_TAG_ENV_EOF\n")
+
+          for _ in range(36):
+              raw = subprocess.check_output(
+                  [
+                      "gh", "pr", "view", pr, "--repo", repo,
+                      "--json", "state,mergedAt,mergeCommit,title,body,url,number",
+                  ],
+                  text=True,
+              )
+              payload = json.loads(raw)
+              ready = merged_release_env(payload)
+              if ready:
+                  write_env(ready)
+                  print(f"Pull request #{pr} merged as {ready['HEAD_SHA']}")
+                  sys.exit(0)
+              if closed_without_merge(payload):
+                  write_env({"SKIP_TAG": "1"})
+                  print(f"Pull request #{pr} closed without merge")
+                  sys.exit(0)
+              time.sleep(10)
+          write_env({"SKIP_TAG": "1"})
+          print(f"Pull request #{pr} is still open; a later manual merge uses the closed event")
+          PY
+
+      - name: Checkout merge commit
+        if: env.SKIP_TAG != '1'
+        run: |
+          set -euo pipefail
+          for _ in 1 2 3 4 5 6; do
+            git fetch origin main
+            if git cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+          git checkout --detach "$HEAD_SHA"
+          if [ -z "${BASE_SHA:-}" ]; then
+            echo "BASE_SHA=$(git rev-parse HEAD^1)" >> "$GITHUB_ENV"
+          fi
 
       - name: Tag changed add-ons
+        if: env.SKIP_TAG != '1'
         run: python3 .github/scripts/addon_ci.py tag
