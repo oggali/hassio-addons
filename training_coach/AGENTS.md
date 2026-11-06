@@ -28,7 +28,7 @@ Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA,
 | `app/planner.py` | Today's session. Recovery overrides the calendar. |
 | `app/recipes.py` | Human title, km range, pace, interval structure. |
 | `app/feedback.py` | Evening recap, compliance, Android action packs (max three buttons). |
-| `app/store.py` | DuckDB schema, upserts, share copy, wipe. `SCHEMA_VERSION` is `"7"`. |
+| `app/store.py` | DuckDB schema, upserts, share copy, wipe. `SCHEMA_VERSION` is `"8"`. |
 | `app/persist.py` | Empty shim. Call `CoachStore`, not this module. |
 | `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. |
 | `tests/` | `unittest`. No Home Assistant. Fixture states in `test_planner.py`. |
@@ -53,7 +53,7 @@ Update this `AGENTS.md` in the same change when you add or rename a module, chan
 
 `main()` loads settings, opens `/data/coach.duckdb`, ensures helpers, then loops. Three daily slots (`run_time`, `evening_time`, `share_export_time` default `23:00`) fire once per local day. A 30s sleep also drains stdin and polls helpers. Startup runs one plan immediately (`run_immediately_on_start`); it notifies only if the morning slot has already passed and today's morning notify was not sent yet. That notify uses the same wake wait as the morning slot. Notify claims live in DuckDB `meta` (`last_notify_morning`, `last_notify_evening`).
 
-Stdin (`hassio.addon_stdin`): `wipe_db`, `fetch_sessions`, `set_prefs`, `checkin`. JSON objects are accepted; a body with `feeling` or `did_plan` and no `cmd` is a check-in, otherwise `set_prefs`. `wipe_db` deletes the live database and re-seeds history (365 days) on the next plan. `fetch_sessions` upserts current sensors and refreshes the share copy; it does not notify or rebuild the plan.
+Stdin (`hassio.addon_stdin`): `wipe_db`, `fetch_sessions`, `set_prefs`, `set_locks`, `checkin`. JSON objects are accepted; a body with `feeling` or `did_plan` and no `cmd` is a check-in, otherwise `set_prefs`. `set_locks` updates only the weekday keys it contains (`mon`…`sun`) and pushes the same values to the lock dropdowns. `wipe_db` deletes the live database and re-seeds history (365 days) on the next plan. `fetch_sessions` upserts current sensors and refreshes the share copy; it does not notify or rebuild the plan.
 
 Telegram (`notify_service`) is always used. Each Telegram send sets `data.parse_mode` to `plain_text`. The bot default is legacy Markdown, and an unmatched `_` (as in `same_family`) makes Telegram reject the message. Android (`mobile_notify_service`) is optional. Empty, `null`, `none`, `unknown`, or `false` disables it and the websocket listener.
 
@@ -63,9 +63,9 @@ Telegram (`notify_service`) is always used. Each Telegram send sets `data.parse_
 
 1. `ingest` reads `tracked_entity_ids`, classifies Strava + Garmin with the heart-rate reference, upserts sessions, then reclassifies stored rows whose type changes under that reference. Oura workouts are never read. If the store has never been seeded, history is pulled once. A notifying morning run calls `wait_for_oura` first: Oura readiness or sleep updated today, and Garmin awake (`garmin_is_awake`). The deadline is `run_time` plus `oura_wait_minutes`, and at least 180 minutes.
 2. `reconcile_yesterday` upgrades a `skipped` row when a late session showed up.
-3. Prefs sync from helpers. A fingerprint change rebuilds the plan after ~30s, without a notification.
-4. `rebuild_calendar`: load snapshot → paces → `build_skeleton` → `finish_distribution` → `search_calendar` → replace `plan_days`.
-5. `plan_day`. With a race and a row for today, `overlay_calendar`. Otherwise `pick_session_type` (weekly quotas, weekend long-run bias).
+3. Prefs sync from helpers. A fingerprint change, including a weekday-lock change, rebuilds the plan after ~30s, without a notification.
+4. `rebuild_calendar`: load snapshot → paces → `build_skeleton` (locks first) → `finish_distribution` → `search_calendar` → replace `plan_days`. Locked rows keep `source="lock"` through the search.
+5. `plan_day`. With a race, or when today is a weekday lock, `overlay_calendar`. Otherwise `pick_session_type` (weekly quotas, weekend long-run bias, locks counted).
 6. Publish `sensor.training_coach_session`, `_summary`, `_goal`, `_feedback`. Persist recovery and the decision. Optionally notify (the message includes the rolling 7-day session-load sum), then copy the database to share.
 
 ## Evening path
@@ -86,14 +86,15 @@ Session type constants live in `classify.py`. Use them; do not sprinkle new stri
 - A session under 10 minutes or under 1000 m is not "already trained".
 - Garmin and Strava copies of one outing merge when starts are within 45 minutes and duration agrees. Morning + afternoon doubles stay separate. Planned Garmin `last_workout` is ignored.
 - Strava date sensor wins over the activity attribute when they disagree (`DATE MISMATCH` in the log).
-- Recovery wins over the calendar and over weekly quotas. `poor` or Oura rest mode → rest. `ok` uses the low end of the km range and downgrades quality/long. Gates are in `pick_session_type` and `overlay_calendar`; change both if the rule is shared.
+- Recovery wins over the calendar, over weekday locks, and over weekly quotas. `poor` or Oura rest mode → rest. `ok` uses the low end of the km range and downgrades quality/long. Gates are in `pick_session_type` and `overlay_calendar`; change both if the rule is shared.
+- Weekday locks live in DuckDB `weekday_locks` and the helpers `input_select.training_coach_lock_mon` … `_sun`. They are placed before the week template and count toward the weekly caps, including a missed day in the last 7 days. Empty locks leave the quota picker and the race skeleton unchanged. No race: only a locked today uses `overlay_calendar`. A locked hard day accepts two nights since the previous hard day (Saturday long keeps Monday intervals). It becomes easy when yesterday was hard or long. Unlocked days keep `HARD_SPACING_HOURS` (48). Race day replaces a lock on that date. Search does not drop, shrink, or swap a `source="lock"` row.
 - Garmin recovery votes (sleep, readiness, body battery, HRV, recovery time) count only after `garmin_is_awake`: morning training readiness changed today to a real score, or the sleep score changed today. A `calendarDate` on the morning sensor must be today when present. Body battery and a state of `unknown` are not a wake. Until then yesterday's preserved sleep score cannot force rest.
 - No race (`distance` `none` or no date): quota picker only. Race set: periodized skeleton through race day, then Monte Carlo. Book plans are not copied.
 - Long-run kilometres are floored at 2.2× weekday easy or ~90 minutes at easy pace (`load.long_run_floor_km`, `periodize._long_center`). Do not size longs from the median of barely-long sessions.
 - Day activity (steps, calories, intensity) is fused from Oura Activity + Garmin totals. It explains the day. It does not mark the day trained.
 - Feelings, did-plan, skip reason, and effort fit are helpers and `feedback_history`. They are not add-on options.
 - DuckDB `TIMESTAMP` is UTC without tzinfo (`_utc_naive`). Live file is `/data/coach.duckdb` (locked, never auto-pruned). Share copy is `/share/training_coach/coach.duckdb`, written after morning notify, after `fetch_sessions`, and at 23:00. Other apps open the copy read-only.
-- Schema changes: add an idempotent `ALTER` in `CoachStore.migrate` and bump `SCHEMA_VERSION`. Backfill CTL/ATL when new load columns appear on a non-empty `sessions` table.
+- Schema changes: add an idempotent `ALTER` in `CoachStore.migrate` and bump `SCHEMA_VERSION`. `weekday_locks` is created from `_SCHEMA_SQL` (`SCHEMA_VERSION` `"8"`). Backfill CTL/ATL when new load columns appear on a non-empty `sessions` table.
 
 Tune behavior in the module that owns the constant (`INTENSITY`, `CTL_TAU` / `ATL_TAU`, ladders, `PEAK_LONG_KM`, `HARD_SPACING_HOURS`, `TSB_OVERREACH`, Monte Carlo draw counts). Those are code constants, not add-on options. `simulate.py` uses stdlib `random` only.
 

@@ -9,6 +9,8 @@ from entities import (
     DID_PLAN_HELPER,
     EFFORT_FIT_HELPER,
     FEELING_HELPER,
+    LOCK_HELPERS,
+    LOCK_HELPER_IDS,
     RACE_DATE_HELPER,
     RACE_DISTANCE_HELPER,
     SKIP_REASON_HELPER,
@@ -22,11 +24,17 @@ from goal import (
     DID_PLAN_OPTIONS,
     EFFORT_FIT_OPTIONS,
     FEELING_OPTIONS,
+    LOCK_OPTIONS,
+    LOCK_TYPES,
+    LOCK_UNSET,
     RACE_DISTANCES,
     SKIP_REASON_OPTIONS,
+    WEEKDAY_KEYS,
     Prefs,
     clamp_int,
+    lock_fingerprint,
     normalize_race_distance,
+    parse_lock_updates,
     parse_race_date,
 )
 from ha_client import HomeAssistantClient
@@ -60,6 +68,18 @@ def prefs_from_states(states: dict[str, dict[str, Any]], today: date | None = No
         weekly_rest_days=clamp_int(parse_float(state_value(states.get(WEEKLY_REST_HELPER))), 1, 0, 4),
         source="helper",
     )
+
+
+def locks_from_states(states: dict[str, dict[str, Any]]) -> dict[int, str]:
+    locks: dict[int, str] = {}
+    for weekday, entity_id in LOCK_HELPERS:
+        raw = state_value(states.get(entity_id))
+        if is_unavailable(raw):
+            continue
+        text = str(raw).strip().lower()
+        if text in LOCK_TYPES:
+            locks[weekday] = text
+    return locks
 
 
 def read_feedback_helpers(states: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -205,12 +225,26 @@ HELPER_CREATE_SPECS: list[tuple[str, str, dict[str, Any]]] = [
         },
     ),
 ]
+HELPER_CREATE_SPECS.extend(
+    (
+        "input_select",
+        entity_id,
+        {
+            "name": f"Training coach lock {WEEKDAY_KEYS[weekday]}",
+            "options": list(LOCK_OPTIONS),
+            "initial": LOCK_UNSET,
+            "icon": "mdi:lock-outline",
+        },
+    )
+    for weekday, entity_id in LOCK_HELPERS
+)
 
 
 class PrefsManager:
     def __init__(self, client: HomeAssistantClient, store: CoachStore) -> None:
         self.client = client
         self.store = store
+        self._lock_helpers_created: set[str] = set()
 
     def ensure_helpers(self) -> None:
         missing = [
@@ -240,6 +274,8 @@ class PrefsManager:
                         _log(f"Created helper {created_eid} (expected {entity_id})")
                     else:
                         _log(f"Created helper {entity_id}")
+                    if entity_id in LOCK_HELPER_IDS:
+                        self._lock_helpers_created.add(entity_id)
                 except Exception as exc:  # noqa: BLE001
                     _log(f"Could not create helper {entity_id}: {exc}")
         finally:
@@ -259,6 +295,7 @@ class PrefsManager:
             DID_PLAN_HELPER,
             SKIP_REASON_HELPER,
             EFFORT_FIT_HELPER,
+            *LOCK_HELPER_IDS,
         ]
         return self.client.get_states(ids)
 
@@ -314,6 +351,43 @@ class PrefsManager:
         stored = self.store.insert_prefs(prefs)
         self.push_prefs_to_helpers(stored)
         return stored
+
+    def sync_locks_from_helpers(self) -> tuple[bool, dict[int, str]]:
+        """Helpers win once they exist. Brand-new helpers keep a stored map."""
+        ids = list(LOCK_HELPER_IDS)
+        if ids and set(ids) <= self._lock_helpers_created:
+            self._lock_helpers_created.clear()
+            stored = self.store.weekday_locks()
+            if stored:
+                self.push_locks_to_helpers(stored)
+                return False, stored
+        if all(self.client.get_state(entity_id) is None for entity_id in ids):
+            return False, self.store.weekday_locks()
+        locks = locks_from_states(self.client.get_states(ids))
+        current = self.store.weekday_locks()
+        if lock_fingerprint(locks) == lock_fingerprint(current):
+            return False, current
+        self.store.replace_weekday_locks(locks, "helper")
+        _log(f"Weekday locks updated {lock_fingerprint(locks) or 'none'} source=helper")
+        return True, self.store.weekday_locks()
+
+    def apply_lock_stdin(self, payload: dict[str, Any]) -> dict[int, str]:
+        current = dict(self.store.weekday_locks())
+        updates = parse_lock_updates(payload)
+        for weekday, kind in updates.items():
+            if kind is None:
+                current.pop(weekday, None)
+                self.store.clear_weekday_lock(weekday)
+            else:
+                current[weekday] = kind
+                self.store.upsert_weekday_lock(weekday, kind, "stdin")
+        self.push_locks_to_helpers(current)
+        _log(f"Weekday locks updated {lock_fingerprint(current) or 'none'} source=stdin")
+        return current
+
+    def push_locks_to_helpers(self, locks: dict[int, str]) -> None:
+        for weekday, entity_id in LOCK_HELPERS:
+            self.set_select(entity_id, locks.get(weekday, LOCK_UNSET))
 
     def push_prefs_to_helpers(self, prefs: Prefs) -> None:
         try:

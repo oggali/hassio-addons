@@ -583,5 +583,87 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("/km", recipe.title)
 
 
+class WeekdayLockCalendarTests(unittest.TestCase):
+    def _skeleton(self, today, prefs=None, locks=None):
+        prefs = prefs or Prefs.defaults()
+        sessions = [_session(EASY_RUN, today - timedelta(days=1), 8, 48)]
+        load = build_load_snapshot(sessions, today)
+        paces = build_paces(sessions, prefs, today)
+        return build_skeleton(today, prefs, load, paces, sessions, locks=locks)
+
+    def test_empty_locks_keep_the_default_week(self):
+        from periodize import week_template
+
+        self.assertEqual(
+            week_template(Prefs.defaults()),
+            [STRENGTH, INTERVALS, STRENGTH, EASY_RUN, EASY_RUN, LONG_RUN, REST],
+        )
+
+    def test_monday_intervals_keeps_saturday_long(self):
+        today = date(2026, 8, 24)
+        days = self._skeleton(today, locks={0: INTERVALS})
+        mondays = [day for day in days if day.day.weekday() == 0]
+        self.assertTrue(mondays)
+        self.assertTrue(all(day.session_type == INTERVALS and day.source == "lock" for day in mondays))
+        saturdays = [day for day in days if day.day.weekday() == 5]
+        self.assertTrue(all(day.session_type == LONG_RUN for day in saturdays))
+        quality = [day for day in days if day.session_type in {INTERVALS, TEMPO}]
+        self.assertTrue(all(day.day.weekday() == 0 for day in quality))
+        for day in days:
+            if day.day.weekday() in {1, 6}:
+                self.assertNotIn(day.session_type, {INTERVALS, TEMPO, LONG_RUN})
+
+    def test_zero_long_quota_places_no_long_without_a_lock(self):
+        from periodize import week_template
+
+        types = week_template(Prefs(weekly_long_runs=0))
+        self.assertNotIn(LONG_RUN, types)
+
+    def test_locked_long_above_the_quota_stays(self):
+        from periodize import week_template
+
+        types = week_template(Prefs(weekly_long_runs=0), {5: LONG_RUN, 0: INTERVALS})
+        self.assertEqual(types[0], INTERVALS)
+        self.assertEqual(types[5], LONG_RUN)
+
+    def test_race_day_replaces_a_weekday_lock(self):
+        today = date(2026, 9, 21)
+        prefs = Prefs(race_date=date(2026, 10, 5), race_distance="half", target_time="1:45:00")
+        days = self._skeleton(today, prefs, locks={0: INTERVALS})
+        self.assertEqual(days[-1].day, date(2026, 10, 5))
+        self.assertEqual(days[-1].session_type, LONG_RUN)
+        self.assertNotEqual(days[-1].source, "lock")
+        opening = next(day for day in days if day.day == today)
+        self.assertEqual(opening.session_type, INTERVALS)
+        self.assertEqual(opening.source, "lock")
+
+    def test_search_leaves_a_locked_day_alone(self):
+        import random
+
+        from periodize import PlanDay
+        from simulate import _mutate, _safe_volume
+
+        today = date(2026, 8, 24)
+        locked = PlanDay(today, INTERVALS, 8, 10, 4.2, 4.5, "6×800 m", "base", "lock")
+        quality = PlanDay(today + timedelta(days=3), INTERVALS, 8, 10, 4.2, 4.5, "6×800 m", "base", "skeleton")
+        easy = PlanDay(today + timedelta(days=1), EASY_RUN, 6, 9, 5.5, 6.2, "Easy", "base", "skeleton")
+        rest = PlanDay(today + timedelta(days=6), REST, 0, 0, None, None, "Rest", "base", "skeleton")
+        long_locked = PlanDay(today + timedelta(days=5), LONG_RUN, 28, 32, 5.8, 6.4, "Easy long run", "base", "lock")
+        for seed in range(40):
+            mutated = _mutate([locked, quality, easy, rest, long_locked], random.Random(seed))
+            self.assertEqual(mutated[0].session_type, INTERVALS)
+            self.assertEqual(mutated[0].source, "lock")
+            self.assertEqual(mutated[0].km_max, 10)
+            self.assertEqual(mutated[4].session_type, LONG_RUN)
+            self.assertEqual(mutated[4].source, "lock")
+            self.assertEqual(mutated[4].km_max, 32)
+        sessions = [_session(EASY_RUN, today - timedelta(days=1), 8, 48)]
+        load = build_load_snapshot(sessions, today)
+        capped = _safe_volume([long_locked, PlanDay(today, LONG_RUN, 28, 32, 5.8, 6.4, "Easy long", "base")], load)
+        self.assertEqual(capped[0].km_max, 32)
+        self.assertEqual(capped[0].source, "lock")
+        self.assertLess(capped[1].km_max, 32)
+
+
 if __name__ == "__main__":
     unittest.main()

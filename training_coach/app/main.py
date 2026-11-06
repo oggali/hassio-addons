@@ -107,7 +107,7 @@ def parse_stdin_line(cmd: str) -> dict:
     else:
         raise ValueError(
             f"Unknown stdin command: {text!r} "
-            "(supported: wipe_db, fetch_sessions, set_prefs, checkin)"
+            "(supported: wipe_db, fetch_sessions, set_prefs, set_locks, checkin)"
         )
     if not isinstance(payload, dict):
         raise ValueError("stdin JSON must be an object")
@@ -329,7 +329,13 @@ def dicts_to_plan_days(rows: list[dict]) -> list[PlanDay]:
     return days
 
 
-def rebuild_calendar(store: CoachStore, snapshot, prefs: Prefs, feeling: str | None) -> tuple[list[PlanDay], Any, Any, dict]:
+def rebuild_calendar(
+    store: CoachStore,
+    snapshot,
+    prefs: Prefs,
+    feeling: str | None,
+    locks: dict[int, str] | None = None,
+) -> tuple[list[PlanDay], Any, Any, dict]:
     load = build_load_snapshot(snapshot.sessions, snapshot.today)
     paces = build_paces(snapshot.sessions, prefs, snapshot.today)
     last_compliance = None
@@ -339,8 +345,17 @@ def rebuild_calendar(store: CoachStore, snapshot, prefs: Prefs, feeling: str | N
             if row:
                 last_compliance = row.get("compliance")
             break
+    if locks is None:
+        locks = store.weekday_locks()
     skeleton = build_skeleton(
-        snapshot.today, prefs, load, paces, snapshot.sessions, feeling, last_compliance
+        snapshot.today,
+        prefs,
+        load,
+        paces,
+        snapshot.sessions,
+        feeling,
+        last_compliance,
+        locks,
     )
     finish = finish_distribution(paces, prefs, seed=int(prefs.fingerprint[:8], 16) % 100000)
     feedback = store.load_feedback(since=snapshot.today - timedelta(days=120))
@@ -677,14 +692,15 @@ def run_once(
     _, snapshot = ingest(client, settings, store, wait_oura)
     reconcile_yesterday(store, snapshot)
     changed, prefs = manager.sync_from_helpers(snapshot.today)
+    _locks_changed, locks = manager.sync_locks_from_helpers()
     if store.current_prefs() is None:
         prefs = store.insert_prefs(prefs if changed else Prefs.defaults())
     last_fb = store.get_feedback(snapshot.today - timedelta(days=1)) or {}
     feeling = last_fb.get("feeling")
-    calendar, load, paces, finish = rebuild_calendar(store, snapshot, prefs, feeling)
-    today_row = None
-    if prefs.has_race:
-        today_row = next((d for d in calendar if d.day == snapshot.today), None)
+    calendar, load, paces, finish = rebuild_calendar(store, snapshot, prefs, feeling, locks)
+    today_row = next((day for day in calendar if day.day == snapshot.today), None)
+    if today_row is not None and not (prefs.has_race or today_row.source == "lock"):
+        today_row = None
     upcoming = upcoming_payload(calendar, snapshot.today)
     phase = today_row.phase if today_row else phase_for(snapshot.today, prefs)
     goal = {
@@ -702,6 +718,7 @@ def run_once(
         prediction=finish,
         goal=goal,
         paces=paces,
+        locks=locks,
     )
     publish_plan(client, plan, snapshot.activity)
     publish_goal(client, prefs, snapshot.today, load, finish, phase)
@@ -1008,6 +1025,9 @@ def main() -> None:
                 if cmd == "set_prefs":
                     manager.apply_stdin(payload, now.date())
                     run_once(client, settings, store, manager, wait_oura=False, notify=False)
+                elif cmd == "set_locks":
+                    manager.apply_lock_stdin(payload)
+                    run_once(client, settings, store, manager, wait_oura=False, notify=False)
                 elif cmd == "fetch_sessions":
                     refresh_sessions(client, settings, store)
                 elif cmd == "checkin":
@@ -1020,8 +1040,9 @@ def main() -> None:
             last_poll = time.monotonic()
             try:
                 changed, prefs = manager.sync_from_helpers(now.date())
+                locks_changed, _locks = manager.sync_locks_from_helpers()
                 capture_feedback_helpers(store, manager, now.date())
-                if changed and prefs.fingerprint != last_fingerprint:
+                if (changed and prefs.fingerprint != last_fingerprint) or locks_changed:
                     pending_prefs_at = time.monotonic()
                     last_fingerprint = prefs.fingerprint
             except Exception as exc:  # noqa: BLE001

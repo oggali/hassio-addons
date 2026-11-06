@@ -18,7 +18,7 @@ from parse import coerce_date
 from planner import Plan
 from settings import Settings
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 
 
 def _as_date(value: Any) -> date | None:
@@ -162,6 +162,13 @@ CREATE TABLE IF NOT EXISTS feedback_history (
     recovery_band VARCHAR,
     source VARCHAR,
     notes VARCHAR,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS weekday_locks (
+    weekday INTEGER PRIMARY KEY,
+    session_type VARCHAR NOT NULL,
+    source VARCHAR NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
 
@@ -719,6 +726,30 @@ class CoachStore:
                 }
             )
         return out
+
+    def weekday_locks(self) -> dict[int, str]:
+        rows = self._conn.execute(
+            "SELECT weekday, session_type FROM weekday_locks ORDER BY weekday"
+        ).fetchall()
+        return {int(row[0]): str(row[1]) for row in rows}
+
+    def upsert_weekday_lock(self, weekday: int, session_type: str, source: str) -> None:
+        self._conn.execute("DELETE FROM weekday_locks WHERE weekday = ?", [int(weekday)])
+        self._conn.execute(
+            """
+            INSERT INTO weekday_locks (weekday, session_type, source, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [int(weekday), session_type, source, datetime.now(timezone.utc)],
+        )
+
+    def clear_weekday_lock(self, weekday: int) -> None:
+        self._conn.execute("DELETE FROM weekday_locks WHERE weekday = ?", [int(weekday)])
+
+    def replace_weekday_locks(self, locks: dict[int, str], source: str) -> None:
+        self._conn.execute("DELETE FROM weekday_locks")
+        for weekday, session_type in sorted(locks.items()):
+            self.upsert_weekday_lock(int(weekday), session_type, source)
 
     def get_plan_day(self, day: date) -> dict[str, Any] | None:
         for item in self.load_plan_days(since=day):

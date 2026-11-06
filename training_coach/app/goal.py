@@ -26,6 +26,62 @@ DID_PLAN_OPTIONS = ("unset", "yes", "modified", "skipped")
 SKIP_REASON_OPTIONS = ("unset", "no_time", "tired", "sore", "weather", "other_sport")
 EFFORT_FIT_OPTIONS = ("unset", "too_easy", "about_right", "too_hard")
 
+# Recurring weekday locks. "unset" clears that day. Stored types match session types.
+LOCK_UNSET = "unset"
+LOCK_TYPES = ("easy_run", "long_run", "intervals", "tempo", "strength", "rest")
+LOCK_OPTIONS = (LOCK_UNSET,) + LOCK_TYPES
+WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+WEEKDAY_LABELS = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+WEEKDAY_ALIASES = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tues": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
+
+
+def lock_fingerprint(locks: dict[int, str]) -> str:
+    """Stable text for the current weekday map. Empty when nothing is locked."""
+    return "|".join(f"{int(weekday)}={locks[weekday]}" for weekday in sorted(locks))
+
+
+def parse_lock_updates(payload: dict) -> dict[int, str | None]:
+    """Weekday keys in a stdin body. None clears that day. Unknown keys are ignored."""
+    updates: dict[int, str | None] = {}
+    for key, value in payload.items():
+        if key == "cmd":
+            continue
+        weekday = WEEKDAY_ALIASES.get(str(key).strip().lower())
+        if weekday is None:
+            continue
+        text = "" if value is None else str(value).strip().lower().replace(" ", "_").replace("-", "_")
+        if text in {LOCK_UNSET, "none", "clear", ""}:
+            updates[weekday] = None
+        elif text in LOCK_TYPES:
+            updates[weekday] = text
+    return updates
+
 
 @dataclass(frozen=True)
 class Prefs:

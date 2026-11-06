@@ -30,8 +30,8 @@ from classify import (
     session_day,
 )
 from features import FeatureSnapshot, sessions_since, yesterday_session
-from goal import Prefs
-from periodize import PlanDay
+from goal import WEEKDAY_LABELS, Prefs
+from periodize import LOCK_HARD_TYPES, PlanDay
 from paces import PaceSet
 from recipes import Recipe, build_recipe, recipe_from_plan_day
 from settings import Settings
@@ -99,6 +99,37 @@ class Plan:
         return f"{self.recipe.title}\n{self.recipe.details}\n\nWhy: {self.why}"
 
 
+def apply_lock_quota(counts: WeekCounts, snapshot: FeatureSnapshot, locks: dict[int, str]) -> None:
+    """Count a past lock when that day did not already log the same bucket.
+
+    A missed Monday intervals still uses the quality cap, so a later day does
+    not grow a second quality session.
+    """
+    if not locks:
+        return
+    start = snapshot.today - timedelta(days=6)
+    by_day: dict[date, list[Session]] = {}
+    for session in sessions_since(snapshot, start):
+        when = session_day(session)
+        if when and is_training_session(session):
+            by_day.setdefault(when, []).append(session)
+    for offset in range(7):
+        day = snapshot.today - timedelta(days=offset)
+        kind = locks.get(day.weekday())
+        logged = by_day.get(day, [])
+        if kind == LONG_RUN:
+            if not any(session.session_type == LONG_RUN for session in logged):
+                counts.long += 1
+        elif kind in QUALITY:
+            if not any(session.session_type in QUALITY for session in logged):
+                counts.quality += 1
+                if counts.last_quality_type is None:
+                    counts.last_quality_type = kind
+        elif kind == STRENGTH:
+            if not any(session.session_type == STRENGTH for session in logged):
+                counts.strength += 1
+
+
 def summarize_week(snapshot: FeatureSnapshot) -> WeekCounts:
     start = snapshot.today - timedelta(days=6)
     week = sessions_since(snapshot, start)
@@ -150,9 +181,15 @@ def next_quality(last_quality_type: str | None) -> str:
     return INTERVALS
 
 
-def pick_session_type(snapshot: FeatureSnapshot, prefs: Prefs) -> tuple[str, str]:
+def pick_session_type(
+    snapshot: FeatureSnapshot,
+    prefs: Prefs,
+    locks: dict[int, str] | None = None,
+) -> tuple[str, str]:
     recovery = snapshot.recovery
+    locks = locks or {}
     week = summarize_week(snapshot)
+    apply_lock_quota(week, snapshot, locks)
     yesterday = yesterday_session(snapshot)
     yesterday_type = yesterday.session_type if yesterday else None
     weekday = snapshot.today.weekday()
@@ -204,7 +241,13 @@ def pick_session_type(snapshot: FeatureSnapshot, prefs: Prefs) -> tuple[str, str
     hours_since_hard = week.hours_since_hard
     long_open = week.long < prefs.weekly_long_runs
     quality_open = week.quality < prefs.weekly_quality_runs
-    can_hard = hours_since_hard >= HARD_SPACING_HOURS and yesterday_type not in HARD_OR_LONG
+    tomorrow = locks.get((snapshot.today + timedelta(days=1)).weekday())
+    tomorrow_locked_hard = tomorrow in LOCK_HARD_TYPES
+    can_hard = (
+        hours_since_hard >= HARD_SPACING_HOURS
+        and yesterday_type not in HARD_OR_LONG
+        and not tomorrow_locked_hard
+    )
 
     if long_open and weekend and can_hard:
         return LONG_RUN, "Recovery is good, no long run yet this week, and it is the weekend."
@@ -230,6 +273,13 @@ def pick_session_type(snapshot: FeatureSnapshot, prefs: Prefs) -> tuple[str, str
     return EASY_RUN, f"Recovery is good ({why_recovery()}). An easy run fits the week."
 
 
+def _lock_clause(intended: PlanDay) -> str:
+    if intended.source != "lock":
+        return ""
+    label = TITLES.get(intended.session_type, intended.session_type.replace("_", " ")).lower()
+    return f"{WEEKDAY_LABELS[intended.day.weekday()]} is locked to {label}, but "
+
+
 def overlay_calendar(
     snapshot: FeatureSnapshot,
     prefs: Prefs,
@@ -240,6 +290,7 @@ def overlay_calendar(
     yesterday = yesterday_session(snapshot)
     yesterday_type = yesterday.session_type if yesterday else None
     week = summarize_week(snapshot)
+    locked = _lock_clause(intended)
 
     yesterday_label = describe_session(yesterday_type, yesterday) if yesterday_type else ""
 
@@ -247,14 +298,23 @@ def overlay_calendar(
         return "; ".join(recovery.reasons[:3])
 
     if snapshot.already_trained_today:
+        if locked:
+            return REST, f"{locked}you already have a session logged today.", False
         return REST, "You already have a session logged today, so extra training is not needed.", False
     if recovery.rest_mode:
+        if locked:
+            return REST, f"{locked}rest mode is on ({why_recovery()}).", False
         return REST, f"Rest mode is on ({why_recovery()}).", False
     if yesterday_type in HARD_OR_LONG and recovery.band == "poor":
-        return REST, (
-            f"Yesterday was a {yesterday_label.lower()} and recovery is poor ({why_recovery()})."
-        ), False
+        body = f"yesterday was a {yesterday_label.lower()} and recovery is poor ({why_recovery()})."
+        if locked:
+            return REST, f"{locked}{body}", False
+        return REST, body[0].upper() + body[1:], False
     if recovery.band == "poor":
+        if locked:
+            return REST, (
+                f"{locked}recovery looks poor ({why_recovery()}). Take a full rest day."
+            ), False
         return REST, f"Recovery looks poor ({why_recovery()}). Take a full rest day.", False
 
     intended_type = intended.session_type
@@ -277,17 +337,30 @@ def overlay_calendar(
         ), True
 
     hours_since_hard = week.hours_since_hard
-    if intended_type in HARD_OR_LONG and (
-        hours_since_hard < HARD_SPACING_HOURS or yesterday_type in HARD_OR_LONG
-    ):
+    # A locked hard day accepts two nights. Saturday long still leaves Monday
+    # intervals in place. Yesterday being hard or long does not.
+    gap_blocked = hours_since_hard < HARD_SPACING_HOURS and not (
+        intended.source == "lock" and intended_type in LOCK_HARD_TYPES
+    )
+    if intended_type in HARD_OR_LONG and (gap_blocked or yesterday_type in HARD_OR_LONG):
+        if locked and yesterday_type in HARD_OR_LONG:
+            return EASY_RUN, (
+                f"{locked}yesterday was a {yesterday_label.lower()}, so easy today."
+            ), True
         return EASY_RUN, (
             f"Plan had {TITLES.get(intended_type, intended_type).lower()}{phase_bit}, "
             f"but a hard/long session was too recent, so easy today."
         ), True
 
+    label = TITLES.get(intended_type, intended_type).lower()
+    if intended.source == "lock":
+        name = WEEKDAY_LABELS[intended.day.weekday()]
+        return intended_type, (
+            f"{name} is locked to {label}. Recovery is good and the "
+            f"{intended.phase or 'week'} plan keeps it."
+        ), False
     return intended_type, (
-        f"Recovery is good and the {intended.phase or 'week'} plan calls for "
-        f"{TITLES.get(intended_type, intended_type).lower()}."
+        f"Recovery is good and the {intended.phase or 'week'} plan calls for {label}."
     ), False
 
 
@@ -300,8 +373,10 @@ def plan_day(
     prediction: dict | None = None,
     goal: dict | None = None,
     paces: PaceSet | None = None,
+    locks: dict[int, str] | None = None,
 ) -> Plan:
     prefs = prefs or Prefs.defaults()
+    locks = locks or {}
     yesterday = yesterday_session(snapshot)
     yesterday_type = yesterday.session_type if yesterday else None
     low_end = False
@@ -321,7 +396,7 @@ def plan_day(
                 paces=paces,
             )
     else:
-        session_type, why = pick_session_type(snapshot, prefs)
+        session_type, why = pick_session_type(snapshot, prefs, locks)
         recipe = build_recipe(session_type, snapshot.sessions, yesterday_type, paces=paces)
     if prediction and prefs.has_race and prediction.get("feasible") is False:
         why = (
@@ -329,6 +404,7 @@ def plan_day(
             "instead of chasing an unreachable clock."
         )
     week = summarize_week(snapshot)
+    apply_lock_quota(week, snapshot, locks)
     return Plan(
         session_type=session_type,
         recipe=recipe,

@@ -682,5 +682,117 @@ class WakeTests(unittest.TestCase):
         self.assertFalse(garmin_is_awake(states, TZ, self.now.date()))
 
 
+class WeekdayLockTests(unittest.TestCase):
+    def setUp(self):
+        self.settings = Settings(timezone="Europe/Helsinki", run_immediately=False)
+
+    def _plan(self, states, now, **kwargs):
+        for eid, ent in list(states.items()):
+            if eid.startswith("sensor.oura"):
+                states[eid] = entity(ent["state"], now, **ent.get("attributes", {}))
+        snap = build_snapshot(states, self.settings, now=now)
+        return plan_day(snap, self.settings, **kwargs)
+
+    def test_saturday_still_takes_the_long_run(self):
+        plan = self._plan(good_recovery(), SATURDAY, locks={0: INTERVALS})
+        self.assertEqual(plan.session_type, LONG_RUN)
+
+    def test_sunday_stays_off_the_hard_day_before_monday(self):
+        plan = self._plan(good_recovery(), SATURDAY + timedelta(days=1), locks={0: INTERVALS})
+        self.assertNotIn(plan.session_type, {LONG_RUN, INTERVALS, TEMPO})
+
+    def test_missed_monday_lock_keeps_the_quality_slot(self):
+        plan = self._plan(good_recovery(), SATURDAY - timedelta(days=2), locks={0: INTERVALS})
+        self.assertNotIn(plan.session_type, {INTERVALS, TEMPO})
+
+    def test_unlocked_monday_after_saturday_long_stays_easy(self):
+        now = SATURDAY + timedelta(days=2)
+        states = good_recovery()
+        add_strava(states, 0, "Saturday long", "Run", SATURDAY, 95, avg_hr=138)
+        plan = self._plan(states, now)
+        self.assertNotIn(plan.session_type, {LONG_RUN, INTERVALS, TEMPO})
+
+    def test_locked_today_is_intervals_without_a_race(self):
+        from periodize import PlanDay
+
+        intended = PlanDay(
+            day=SATURDAY.date(),
+            session_type=INTERVALS,
+            km_min=8,
+            km_max=10,
+            pace_min=4.5,
+            pace_max=4.8,
+            structure="6×800 m",
+            phase="base",
+            source="lock",
+        )
+        plan = self._plan(good_recovery(), SATURDAY, calendar_today=intended)
+        self.assertEqual(plan.session_type, INTERVALS)
+        self.assertIn("Saturday is locked to intervals", plan.why)
+
+    def test_poor_recovery_names_the_lock(self):
+        from periodize import PlanDay
+
+        now = SATURDAY + timedelta(days=2)
+        intended = PlanDay(
+            day=now.date(),
+            session_type=INTERVALS,
+            km_min=8,
+            km_max=10,
+            pace_min=4.5,
+            pace_max=4.8,
+            structure="6×800 m",
+            phase="base",
+            source="lock",
+        )
+        plan = self._plan(poor_recovery(), now, calendar_today=intended)
+        self.assertEqual(plan.session_type, REST)
+        self.assertIn("Monday is locked to intervals", plan.why)
+        self.assertIn("recovery looks poor", plan.why.lower())
+
+    def test_saturday_long_leaves_locked_monday_intervals(self):
+        from periodize import PlanDay
+
+        now = SATURDAY + timedelta(days=2)
+        states = good_recovery()
+        add_strava(states, 0, "Saturday long", "Run", SATURDAY, 95, avg_hr=138)
+        intended = PlanDay(
+            day=now.date(),
+            session_type=INTERVALS,
+            km_min=8,
+            km_max=10,
+            pace_min=4.5,
+            pace_max=4.8,
+            structure="6×800 m",
+            phase="base",
+            source="lock",
+        )
+        plan = self._plan(states, now, calendar_today=intended)
+        self.assertEqual(plan.session_type, INTERVALS)
+        self.assertIn("Monday is locked to intervals", plan.why)
+
+    def test_yesterday_long_turns_locked_monday_easy(self):
+        from periodize import PlanDay
+
+        now = SATURDAY + timedelta(days=2)
+        states = good_recovery()
+        add_strava(states, 0, "Sunday long", "Run", now - timedelta(days=1), 95, avg_hr=138)
+        intended = PlanDay(
+            day=now.date(),
+            session_type=INTERVALS,
+            km_min=8,
+            km_max=10,
+            pace_min=4.5,
+            pace_max=4.8,
+            structure="6×800 m",
+            phase="base",
+            source="lock",
+        )
+        plan = self._plan(states, now, calendar_today=intended)
+        self.assertEqual(plan.session_type, EASY_RUN)
+        self.assertIn("Monday is locked to intervals", plan.why)
+        self.assertIn("yesterday", plan.why.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
