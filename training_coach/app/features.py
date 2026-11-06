@@ -238,6 +238,27 @@ def garmin_sleep_for_vote(
     return None
 
 
+_HOUR_UNITS = {"h", "hr", "hrs", "hour", "hours"}
+_MINUTE_UNITS = {"min", "mins", "minute", "minutes"}
+
+
+def garmin_recovery_hours(entity: dict[str, Any] | None) -> float | None:
+    """Garmin recovery time in hours, read in the sensor's ``unit_of_measurement``.
+
+    Without a known unit, a value above 48 is taken as minutes.
+    """
+    raw = parse_float(state_value(entity))
+    if raw is None:
+        return None
+    unit = attr(entity, "unit_of_measurement")
+    unit_s = "" if is_unavailable(unit) else str(unit).strip().lower()
+    if unit_s in _HOUR_UNITS:
+        return raw
+    if unit_s in _MINUTE_UNITS:
+        return raw / 60.0
+    return raw / 60.0 if raw > 48 else raw
+
+
 def score_recovery(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> Recovery:
     rest_mode = parse_bool(state_value(states.get(OURA_REST_MODE))) or False
     oura_readiness = parse_float(state_value(states.get(OURA_READINESS)))
@@ -252,10 +273,7 @@ def score_recovery(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date)
     else:
         garmin_score, garmin_text = _garmin_readiness_score(readiness_raw)
     body_battery = parse_float(state_value(states.get(GARMIN_BODY_BATTERY)))
-    recovery_raw = parse_float(state_value(states.get(GARMIN_RECOVERY_TIME)))
-    recovery_hours = None
-    if recovery_raw is not None:
-        recovery_hours = recovery_raw / 60.0 if recovery_raw > 48 else recovery_raw
+    recovery_hours = garmin_recovery_hours(states.get(GARMIN_RECOVERY_TIME))
     hrv_status = state_value(states.get(GARMIN_HRV_STATUS))
     hrv_status_s = None if is_unavailable(hrv_status) else str(hrv_status)
     night = parse_float(state_value(states.get(GARMIN_HRV_NIGHT)))

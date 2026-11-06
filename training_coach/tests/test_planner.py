@@ -40,6 +40,7 @@ from entities import (  # noqa: E402
     GARMIN_LAST_ACTIVITIES,
     GARMIN_LAST_ACTIVITY,
     GARMIN_MORNING_READINESS,
+    GARMIN_RECOVERY_TIME,
     GARMIN_SLEEP_SCORE,
     GARMIN_TOTAL_STEPS,
     GARMIN_TRAINING_READINESS,
@@ -55,7 +56,7 @@ from entities import (  # noqa: E402
     OURA_TEMP,
     strava_slot_ids,
 )
-from features import build_snapshot, garmin_is_awake  # noqa: E402
+from features import build_snapshot, garmin_is_awake, garmin_recovery_hours  # noqa: E402
 from load import session_load  # noqa: E402
 from planner import plan_day  # noqa: E402
 from settings import Settings  # noqa: E402
@@ -680,6 +681,57 @@ class WakeTests(unittest.TestCase):
             70, self.now, calendarDate="2026-10-23", sleep_score=55
         )
         self.assertFalse(garmin_is_awake(states, TZ, self.now.date()))
+
+
+class RecoveryTimeUnitTests(unittest.TestCase):
+    """Garmin Connect 3.0.6+ reports recovery time in hours; 72 h must not read as 1.2 h."""
+
+    def setUp(self):
+        self.settings = Settings(timezone="Europe/Helsinki", run_immediately=False)
+
+    def _awake(self, recovery_state, **attrs) -> dict:
+        states = good_recovery()
+        states[GARMIN_SLEEP_SCORE] = entity(80, SATURDAY)
+        states[GARMIN_RECOVERY_TIME] = entity(recovery_state, SATURDAY, **attrs)
+        return states
+
+    def test_hours_unit_is_not_divided(self):
+        self.assertEqual(garmin_recovery_hours(entity(72, unit_of_measurement="h")), 72)
+        self.assertEqual(garmin_recovery_hours(entity(30, unit_of_measurement="hours")), 30)
+
+    def test_minutes_unit_is_divided(self):
+        self.assertEqual(garmin_recovery_hours(entity(30, unit_of_measurement="min")), 0.5)
+        self.assertEqual(garmin_recovery_hours(entity(1440, unit_of_measurement="min")), 24)
+
+    def test_no_unit_keeps_the_size_guess(self):
+        self.assertEqual(garmin_recovery_hours(entity(120)), 2)
+        self.assertEqual(garmin_recovery_hours(entity(30)), 30)
+        self.assertIsNone(garmin_recovery_hours(entity("unavailable", unit_of_measurement="h")))
+
+    def test_72_hours_is_a_poor_vote(self):
+        snap = build_snapshot(self._awake(72, unit_of_measurement="h"), self.settings, now=SATURDAY)
+        self.assertEqual(snap.recovery.garmin_recovery_hours, 72)
+        self.assertIn("Garmin still wants 72h recovery", snap.recovery.reasons)
+        self.assertNotEqual(snap.recovery.band, "good")
+
+    def test_72_hours_and_low_hrv_is_rest(self):
+        states = self._awake(72, unit_of_measurement="h")
+        states[GARMIN_HRV_NIGHT] = entity(30)
+        snap = build_snapshot(states, self.settings, now=SATURDAY)
+        self.assertEqual(snap.recovery.band, "poor")
+        self.assertEqual(plan_day(snap, self.settings).session_type, REST)
+
+    def test_72_hours_downgrades_the_weekend_long_run(self):
+        snap = build_snapshot(self._awake(72, unit_of_measurement="h"), self.settings, now=SATURDAY)
+        plan = plan_day(snap, self.settings)
+        self.assertNotIn(plan.session_type, {LONG_RUN, INTERVALS, TEMPO})
+
+    def test_30_minutes_does_not_force_rest(self):
+        states = self._awake(30, unit_of_measurement="min")
+        states[GARMIN_HRV_NIGHT] = entity(30)
+        snap = build_snapshot(states, self.settings, now=SATURDAY)
+        self.assertEqual(snap.recovery.garmin_recovery_hours, 0.5)
+        self.assertNotEqual(snap.recovery.band, "poor")
 
 
 class WeekdayLockTests(unittest.TestCase):
