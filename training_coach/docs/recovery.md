@@ -4,7 +4,7 @@
 
 Morning recovery is one of `poor`, `ok`, or `good`. Oura is the primary vote. Garmin confirms or disagrees. The band is what the planner reads; the individual scores are kept on the recovery row and in the “why” text.
 
-Code: [`score_recovery`](../app/features.py#L241-L345).
+Code: [`score_recovery`](../app/features.py#L262-L363).
 
 Garmin votes count only after a wake snapshot ([`garmin_is_awake`](../app/features.py#L197-L217)). That is `sensor.garmin_connect_morning_training_readiness` changing today to a real score, or `sensor.sleep_score` changing today. A `calendarDate` on the morning sensor must be today when the attribute is present. Yesterday’s preserved sleep score stays on `sensor.sleep_score` until the watch syncs, and body battery drains all night, so neither means you are awake. Until the wake snapshot, Garmin sleep, readiness, body battery, HRV, and recovery time do not vote. Oura still does.
 
@@ -25,7 +25,7 @@ Each input below adds one poor vote or one good vote. Missing values are skipped
 | Oura temperature deviation | absolute value ≥ 0.5 °C | — |
 | Garmin recovery time | ≥ 24 h | ≤ 8 h |
 
-Garmin recovery time: a raw value above 48 is treated as minutes and divided by 60. Otherwise it is already hours.
+Garmin recovery time is read in the sensor's `unit_of_measurement` ([`garmin_recovery_hours`](../app/features.py#L245-L259)). Garmin Connect 3.0.6 and later reports hours (`h`), so 72 means 72 hours and is a poor vote. `min` is divided by 60. Only when the sensor has no unit (or one not listed in that function) is a value above 48 taken as minutes; otherwise it is hours.
 
 Garmin training readiness may be a number or a word. Words map in [`_garmin_readiness_score`](../app/features.py#L145-L166): prime 90, productive 80, moderate 65, detraining 50, strained 48, poor 45, recovery 42, unproductive 40. A number from 1 to 10 is multiplied by 10 first. A state of `unknown` is missing, not a score, and does not hide the morning-readiness sensor.
 
@@ -33,14 +33,14 @@ The sleep vote uses the `sleep_score` attribute on morning readiness when that s
 
 ## Which band
 
-In order ([`score_recovery`](../app/features.py#L318-L325)):
+In order ([`score_recovery`](../app/features.py#L336-L343)):
 
 1. **`poor`** if rest mode is on, or there are **2 or more** poor votes, or Oura readiness is under **55**.
 2. **`good`** if there are no poor votes, at least **3** good votes, and Oura readiness is missing or at least **75**.
 3. **`good`** if there are no poor votes, at least **1** good vote, and Oura readiness is missing or at least **70**.
 4. Otherwise **`ok`**.
 
-The reason strings (the low scores, rest mode, temperature) are what the morning “why” quotes. At most the first three are shown. High day activity can append another reason — 12k steps, or 45 intensity minutes — and does not change the band ([`add_activity_reasons`](../app/features.py#L504-L510)).
+The reason strings (the low scores, rest mode, temperature) are what the morning “why” quotes. At most the first three are shown. High day activity can append another reason — 12k steps, or 45 intensity minutes — and does not change the band ([`add_activity_reasons`](../app/features.py#L522-L528)).
 
 ## What the band changes
 
