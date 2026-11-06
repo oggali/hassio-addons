@@ -39,10 +39,10 @@ Morning lines look like `Easy run  6–10 km  @  5:50–6:30 /km` or `Intervals 
 1. **Recovery band** (`poor` / `ok` / `good`) from Oura (primary) and Garmin (confirm).
 2. **Sport sessions** from Strava recent activities + splits, and Garmin **completed** activities (`last_activity` / `last_activities`). Garmin/Strava copies of the **same outing** are merged when start times are within ~45 minutes (and duration agrees); morning + afternoon doubles stay separate. **Oura workouts are ignored** — the ring auto-detects walks and easy movement that are not structured training.
 3. **Daily activity** (steps, active calories, intensity minutes) is fused from Oura Activity + Garmin daily totals so rest-day walking still shows up as load. This does **not** mark the day as already trained.
-4. **Live prefs** (Home Assistant helpers, not add-on config): race date / distance / target time and weekly long / quality / strength / rest caps. Changing a helper does **not** restart the add-on; the coach polls and rebuilds the remaining calendar.
-5. **No race set:** today’s session is the daily quota picker (1 long, 1 quality, 2 strength, 1 rest by default). The upcoming-week list is still a 13-day skeleton and does not override today.
+4. **Live prefs** (Home Assistant helpers, not add-on config): race date / distance / target time, weekly long / quality / strength / rest caps, and optional weekday locks. Changing a helper does **not** restart the add-on; the coach polls and rebuilds the remaining calendar.
+5. **No race set:** today’s session is the daily quota picker (1 long, 1 quality, 2 strength, 1 rest by default), unless today is a weekday lock. The upcoming-week list is still a 13-day skeleton. Unlocked days in that list do not override today.
 6. **Race set:** original periodized calendar to race day (base / build / peak / taper), km + pace ranges from your easy history and Riegel equivalents of the target (or predicted) time. Interval/tempo structure varies by distance and by the last completed quality session. Long-run km is at least **2.2× weekday easy** or **~90 min** at easy pace (not the median of sessions that barely cleared the 75-min “long” tag). A small Monte Carlo search nudges remaining days (penalizes Banister-style TSB below −25); a second Monte Carlo publishes P10 / P50 / P90 finish time.
-7. **Gates:** rest mode or poor recovery still wins over the calendar. Okay recovery uses the **low** end of the km range and downgrades quality/long. Hard/long spacing uses logged quality, long runs, and `cross_hard` / legacy `cross_long` — not `cross_easy` or `cross_easy_long`.
+7. **Gates:** rest mode or poor recovery still wins over the calendar, including a weekday lock. Okay recovery uses the **low** end of the km range and downgrades quality/long. Hard/long spacing uses logged quality, long runs, and `cross_hard` / legacy `cross_long` — not `cross_easy` or `cross_easy_long`. Unlocked days keep the 48-hour gap. A locked hard day stays when the previous hard day was two nights ago (Saturday long, Monday intervals) and becomes easy when yesterday itself was hard or long.
 
 Book training plans are **not** copied. The calendar uses public periodization rules and your data. Vote thresholds, calendar gates, paces, and the load model are in [Recovery bands](docs/recovery.md), [How a day is chosen](docs/planning.md), and [Training load](docs/load.md).
 
@@ -73,12 +73,13 @@ Created on startup if missing (same helper API as **Settings → Devices & servi
 - `input_number.training_coach_weekly_quality_runs` (0–4)
 - `input_number.training_coach_weekly_strength` (0–5)
 - `input_number.training_coach_weekly_rest_days` (0–4)
+- `input_select.training_coach_lock_mon` through `training_coach_lock_sun` — `unset` / `easy_run` / `long_run` / `intervals` / `tempo` / `strength` / `rest`. A set day repeats every week, counts toward the weekly caps, and is stored in DuckDB `weekday_locks`.
 - `input_select.training_coach_feeling` — `unset` / `great` / `ok` / `tired` / `wiped`
 - `input_select.training_coach_did_plan` — `unset` / `yes` / `modified` / `skipped`
 - `input_select.training_coach_skip_reason` — `unset` / `no_time` / `tired` / `sore` / `weather` / `other_sport`
 - `input_select.training_coach_effort_fit` — `unset` / `too_easy` / `about_right` / `too_hard` (asked after did/modified, or after feeling when the session already matched)
 
-Every prefs change is appended to DuckDB `prefs_history` (old rows keep `valid_to`).
+Every prefs change is appended to DuckDB `prefs_history` (old rows keep `valid_to`). Weekday locks are the current map in `weekday_locks` (one row per locked day; `unset` deletes it). Changing a lock dropdown rebuilds the plan the same way as the other prefs.
 
 Stdin (same as wipe):
 
@@ -88,6 +89,12 @@ data:
   addon: local_training_coach
   input: '{"cmd":"set_prefs","race_distance":"half","target_time":"1:45:00","race_date":"2026-10-04"}'
 ```
+
+```yaml
+input: '{"cmd":"set_locks","mon":"intervals"}'
+```
+
+`mon` through `sun` (or the full weekday name) update only the keys you send. `unset` clears that day. The same values are written back to the lock dropdowns.
 
 ```yaml
 input: '{"cmd":"checkin","feeling":"tired","did_plan":"skipped","skip_reason":"sore"}'
@@ -110,6 +117,7 @@ A full copy in the same DuckDB format is written to `/share/training_coach/coach
 | `decisions` | Published morning plan |
 | `prefs_history` | Race goal + weekly caps over time |
 | `plan_days` | Remaining calendar after Monte Carlo search |
+| `weekday_locks` | Repeating weekday sessions (`mon`=0 … `sun`=6) |
 | `feedback_history` | Evening compliance, feeling, skip reason, **effort_fit** |
 | `load_daily` | End-of-day CTL / ATL / TSB / weekly_load (join to feedback by `day`) |
 

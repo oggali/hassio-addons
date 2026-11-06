@@ -251,6 +251,19 @@ class StoreTests(unittest.TestCase):
         titles = [row[0] for row in fresh.execute("SELECT title FROM sessions ORDER BY title").fetchall()]
         self.assertEqual(titles, ["Easy", "Later"])
 
+    def test_weekday_locks_round_trip(self) -> None:
+        self.assertEqual(self.store.get_meta("schema_version"), "8")
+        self.store.upsert_weekday_lock(0, INTERVALS, "stdin")
+        self.store.upsert_weekday_lock(5, "long_run", "stdin")
+        self.assertEqual(self.store.weekday_locks(), {0: INTERVALS, 5: "long_run"})
+        self.store.clear_weekday_lock(0)
+        self.assertEqual(self.store.weekday_locks(), {5: "long_run"})
+        self.store.replace_weekday_locks({1: "tempo"}, "helper")
+        self.assertEqual(self.store.weekday_locks(), {1: "tempo"})
+        self.store.wipe()
+        self.assertEqual(self.store.weekday_locks(), {})
+        self.assertEqual(self.store.get_meta("schema_version"), "8")
+
 
 if __name__ == "__main__":
     unittest.main()

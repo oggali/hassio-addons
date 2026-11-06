@@ -59,6 +59,18 @@ DID_PLAN_HELPER = "input_select.training_coach_did_plan"
 SKIP_REASON_HELPER = "input_select.training_coach_skip_reason"
 EFFORT_FIT_HELPER = "input_select.training_coach_effort_fit"
 
+# Monday=0 … Sunday=6. Options live in goal.LOCK_OPTIONS.
+LOCK_HELPERS = (
+    (0, "input_select.training_coach_lock_mon"),
+    (1, "input_select.training_coach_lock_tue"),
+    (2, "input_select.training_coach_lock_wed"),
+    (3, "input_select.training_coach_lock_thu"),
+    (4, "input_select.training_coach_lock_fri"),
+    (5, "input_select.training_coach_lock_sat"),
+    (6, "input_select.training_coach_lock_sun"),
+)
+LOCK_HELPER_IDS = tuple(entity_id for _, entity_id in LOCK_HELPERS)
+
 PREF_HELPER_IDS = (
     RACE_DATE_HELPER,
     RACE_DISTANCE_HELPER,
@@ -67,7 +79,7 @@ PREF_HELPER_IDS = (
     WEEKLY_QUALITY_HELPER,
     WEEKLY_STRENGTH_HELPER,
     WEEKLY_REST_HELPER,
-)
+) + LOCK_HELPER_IDS
 FEEDBACK_HELPER_IDS = (
     FEELING_HELPER,
     DID_PLAN_HELPER,

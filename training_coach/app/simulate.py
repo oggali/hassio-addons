@@ -116,52 +116,75 @@ def _feeling_hard_penalty(feedback: list[dict]) -> float:
     return 0.0
 
 
+def _clone(day: PlanDay, **kwargs) -> PlanDay:
+    data = {
+        "day": day.day,
+        "session_type": day.session_type,
+        "km_min": day.km_min,
+        "km_max": day.km_max,
+        "pace_min": day.pace_min,
+        "pace_max": day.pace_max,
+        "structure": day.structure,
+        "phase": day.phase,
+        "source": day.source,
+    }
+    data.update(kwargs)
+    return PlanDay(**data)
+
+
 def _mutate(days: list[PlanDay], rng: random.Random) -> list[PlanDay]:
-    out = [
-        PlanDay(
-            day=d.day,
-            session_type=d.session_type,
-            km_min=d.km_min,
-            km_max=d.km_max,
-            pace_min=d.pace_min,
-            pace_max=d.pace_max,
-            structure=d.structure,
-            phase=d.phase,
-            source="search",
-        )
-        for d in days
-    ]
+    out = [_clone(day) for day in days]
     if len(out) < 3:
         return out
     action = rng.choice(["drop_quality", "shrink_long", "swap_rest", "noop"])
     if action == "drop_quality":
-        candidates = [i for i, d in enumerate(out) if d.session_type in QUALITY and d.phase != "race"]
+        candidates = [
+            i
+            for i, day in enumerate(out)
+            if day.session_type in QUALITY and day.phase != "race" and day.source != "lock"
+        ]
         if candidates:
             i = rng.choice(candidates)
-            d = out[i]
-            out[i] = PlanDay(
-                d.day, "easy_run", max(4.0, d.km_min * 0.7), max(5.0, d.km_max * 0.7),
-                d.pace_min, d.pace_max, "Easy (quality dropped)", d.phase, "search",
+            day = out[i]
+            out[i] = _clone(
+                day,
+                session_type="easy_run",
+                km_min=max(4.0, day.km_min * 0.7),
+                km_max=max(5.0, day.km_max * 0.7),
+                structure="Easy (quality dropped)",
+                source="search",
             )
     elif action == "shrink_long":
-        candidates = [i for i, d in enumerate(out) if d.session_type == LONG_RUN and d.phase not in {"race"}]
+        candidates = [
+            i
+            for i, day in enumerate(out)
+            if day.session_type == LONG_RUN and day.phase not in {"race"} and day.source != "lock"
+        ]
         if candidates:
             i = rng.choice(candidates)
-            d = out[i]
-            out[i] = PlanDay(
-                d.day, d.session_type, d.km_min * 0.9, d.km_max * 0.9,
-                d.pace_min, d.pace_max, d.structure, d.phase, "search",
+            day = out[i]
+            out[i] = _clone(
+                day,
+                km_min=day.km_min * 0.9,
+                km_max=day.km_max * 0.9,
+                source="search",
             )
     elif action == "swap_rest":
-        easy_idx = [i for i, d in enumerate(out) if d.session_type == "easy_run"]
-        rest_idx = [i for i, d in enumerate(out) if d.session_type == "rest"]
+        easy_idx = [i for i, day in enumerate(out) if day.session_type == "easy_run" and day.source != "lock"]
+        rest_idx = [i for i, day in enumerate(out) if day.session_type == "rest" and day.source != "lock"]
         if easy_idx and rest_idx:
             i, j = rng.choice(easy_idx), rng.choice(rest_idx)
             out[i], out[j] = (
-                PlanDay(out[i].day, "rest", 0, 0, None, None, "Rest", out[i].phase, "search"),
-                PlanDay(
-                    out[j].day, "easy_run", out[i].km_min, out[i].km_max,
-                    out[i].pace_min, out[i].pace_max, "Easy", out[j].phase, "search",
+                _clone(out[i], session_type="rest", km_min=0, km_max=0, pace_min=None, pace_max=None, structure="Rest", source="search"),
+                _clone(
+                    out[j],
+                    session_type="easy_run",
+                    km_min=out[i].km_min,
+                    km_max=out[i].km_max,
+                    pace_min=out[i].pace_min,
+                    pace_max=out[i].pace_max,
+                    structure="Easy",
+                    source="search",
                 ),
             )
     return out
@@ -199,7 +222,7 @@ def _safe_volume(
     cap = max(floor, max(load.long_km, 8.0) * LONG_WEEKLY_GROWTH)
     out: list[PlanDay] = []
     for day in days:
-        if day.phase == "race":
+        if day.phase == "race" or day.source == "lock":
             out.append(day)
             continue
         km_min, km_max = day.km_min, day.km_max

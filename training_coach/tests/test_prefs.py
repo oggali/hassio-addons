@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from entities import FEEDBACK_HELPER_IDS, PREF_HELPER_IDS  # noqa: E402
+from entities import FEEDBACK_HELPER_IDS, LOCK_HELPER_IDS, PREF_HELPER_IDS  # noqa: E402
 from goal import (  # noqa: E402
     Prefs,
     format_hms,
@@ -20,7 +20,8 @@ from goal import (  # noqa: E402
     parse_target_seconds,
     phase_for,
 )
-from prefs import HELPER_CREATE_SPECS, PrefsManager, prefs_from_states  # noqa: E402
+from classify import INTERVALS  # noqa: E402
+from prefs import HELPER_CREATE_SPECS, PrefsManager, locks_from_states, prefs_from_states  # noqa: E402
 from store import CoachStore  # noqa: E402
 
 
@@ -96,6 +97,9 @@ class FakeClient:
     def get_state(self, entity_id: str):
         return self.states.get(entity_id)
 
+    def get_states(self, entity_ids):
+        return {entity_id: self.states[entity_id] for entity_id in entity_ids if entity_id in self.states}
+
     def call_service(self, domain: str, service: str, data=None):
         self.services.append((domain, service, data))
         return None
@@ -169,6 +173,52 @@ class EnsureHelpersTests(unittest.TestCase):
             PrefsManager(client, None).ensure_helpers()  # type: ignore[arg-type]
         self.assertEqual(len(client.services), len(HELPER_CREATE_SPECS))
         self.assertEqual(client.services[0][:2], ("input_datetime", "create"))
+
+
+class WeekdayLockPrefsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = CoachStore(str(Path(self.tmp.name) / "coach.duckdb"))
+
+    def tearDown(self) -> None:
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_helper_states_and_partial_stdin(self):
+        mon = LOCK_HELPER_IDS[0]
+        fri = LOCK_HELPER_IDS[4]
+        states = {mon: {"state": INTERVALS, "attributes": {}}, fri: {"state": "unset", "attributes": {}}}
+        self.assertEqual(locks_from_states(states), {0: INTERVALS})
+        client = FakeClient({entity_id: {"state": "unset", "attributes": {}} for entity_id in LOCK_HELPER_IDS})
+        manager = PrefsManager(client, self.store)
+        manager.apply_lock_stdin({"cmd": "set_locks", "mon": "intervals", "friday": "long_run"})
+        self.assertEqual(self.store.weekday_locks(), {0: INTERVALS, 4: "long_run"})
+        manager.apply_lock_stdin({"mon": "unset"})
+        self.assertEqual(self.store.weekday_locks(), {4: "long_run"})
+        selected = [call[2]["option"] for call in client.services if call[1] == "select_option"]
+        self.assertIn(INTERVALS, selected)
+        self.assertIn("unset", selected)
+
+    def test_helper_change_replaces_stored_locks(self):
+        mon = LOCK_HELPER_IDS[0]
+        client = FakeClient({mon: {"state": "tempo", "attributes": {}}})
+        manager = PrefsManager(client, self.store)
+        self.store.upsert_weekday_lock(0, INTERVALS, "stdin")
+        changed, locks = manager.sync_locks_from_helpers()
+        self.assertTrue(changed)
+        self.assertEqual(locks, {0: "tempo"})
+        changed_again, _locks = manager.sync_locks_from_helpers()
+        self.assertFalse(changed_again)
+
+    def test_new_helpers_keep_stored_locks(self):
+        client = FakeClient()
+        manager = PrefsManager(client, self.store)
+        manager._lock_helpers_created = set(LOCK_HELPER_IDS)
+        self.store.upsert_weekday_lock(0, INTERVALS, "stdin")
+        changed, locks = manager.sync_locks_from_helpers()
+        self.assertFalse(changed)
+        self.assertEqual(locks, {0: INTERVALS})
+        self.assertEqual(self.store.weekday_locks(), {0: INTERVALS})
 
 
 if __name__ == "__main__":

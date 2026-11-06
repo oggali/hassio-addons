@@ -79,6 +79,14 @@ KM_SPREAD_QUALITY = 0.12
 KM_SPREAD_LONG = 0.08
 KM_SPREAD_EASY = 0.18
 
+# Hard locks keep the next calendar day free. One day between hard sessions
+# (two nights) is enough, so Saturday long can sit with Monday intervals.
+LOCK_HARD_TYPES = frozenset({INTERVALS, TEMPO, LONG_RUN})
+
+
+def adjacent_weekday(left: int, right: int) -> bool:
+    return (left - right) % 7 in {1, 6}
+
 
 @dataclass
 class PlanDay:
@@ -106,78 +114,98 @@ class PlanDay:
         }
 
 
-def week_template(prefs: Prefs) -> list[str]:
-    """Place rest / long / quality / strength on Mon=0 … Sun=6.
+def week_template(prefs: Prefs, locks: dict[int, str] | None = None) -> list[str]:
+    """Place locks, then rest / long / quality / strength on Mon=0 … Sun=6.
 
-    Preference lists are tried in order. Change e.g. long_pref to [6, 5, 4]
-    to prefer Sunday longs over Saturday. Counts come from live HA helpers,
-    not add-on config.
+    Locks are written first and count toward the helper caps. Further hard
+    days stay off the weekday next to a locked hard day. Preference lists are
+    tried in order. Change e.g. long_pref to [6, 5, 4] to prefer Sunday longs
+    over Saturday. Counts come from live HA helpers, not add-on config.
     """
+    locks = {int(weekday): kind for weekday, kind in (locks or {}).items() if kind}
     types = [EASY_RUN] * 7
+    for weekday, kind in locks.items():
+        if 0 <= weekday <= 6:
+            types[weekday] = kind
+    locked = set(locks)
+    hard_locked = {weekday for weekday, kind in locks.items() if kind in LOCK_HARD_TYPES}
+
+    def blocked_for_hard(weekday: int) -> bool:
+        if weekday in locked:
+            return True
+        return any(adjacent_weekday(weekday, other) for other in hard_locked)
+
     rest_pref = [6, 4, 0, 2]  # Sun, Fri, Mon, Wed
-    placed_rest = 0
+    placed_rest = sum(1 for kind in types if kind == REST)
     for wd in rest_pref:
         if placed_rest >= prefs.weekly_rest_days:
             break
+        if wd in locked or types[wd] != EASY_RUN:
+            continue
         types[wd] = REST
         placed_rest += 1
 
     long_pref = [5, 6, 4]  # Sat, Sun, Fri
-    placed_long = 0
-    for wd in long_pref:
-        if placed_long >= prefs.weekly_long_runs:
-            break
-        if types[wd] == REST and prefs.weekly_rest_days:
-            continue
-        types[wd] = LONG_RUN
-        placed_long += 1
-    if placed_long < prefs.weekly_long_runs:
-        for wd in range(7):
+    placed_long = sum(1 for kind in types if kind == LONG_RUN)
+
+    def place_long(candidates: list[int] | range) -> None:
+        nonlocal placed_long
+        for wd in candidates:
             if placed_long >= prefs.weekly_long_runs:
-                break
-            if types[wd] == EASY_RUN:
-                types[wd] = LONG_RUN
-                placed_long += 1
+                return
+            if blocked_for_hard(wd):
+                continue
+            if types[wd] == REST and prefs.weekly_rest_days:
+                continue
+            if types[wd] != EASY_RUN:
+                continue
+            types[wd] = LONG_RUN
+            placed_long += 1
+
+    place_long(long_pref)
+    if placed_long < prefs.weekly_long_runs:
+        place_long(range(7))
 
     quality_pref = [1, 3, 2]  # Tue, Thu, Wed — not adjacent to a typical long
-    placed_q = 0
-    for wd in quality_pref:
-        if placed_q >= prefs.weekly_quality_runs:
-            break
-        if types[wd] in {LONG_RUN, REST}:
-            continue
-        types[wd] = INTERVALS
-        placed_q += 1
-    if placed_q < prefs.weekly_quality_runs:
-        for wd in range(7):
+    placed_q = sum(1 for kind in types if kind in QUALITY)
+
+    def place_quality(candidates: list[int] | range) -> None:
+        nonlocal placed_q
+        for wd in candidates:
             if placed_q >= prefs.weekly_quality_runs:
-                break
-            if types[wd] == EASY_RUN:
-                types[wd] = INTERVALS
-                placed_q += 1
+                return
+            if blocked_for_hard(wd) or types[wd] != EASY_RUN:
+                continue
+            types[wd] = INTERVALS
+            placed_q += 1
+
+    place_quality(quality_pref)
+    if placed_q < prefs.weekly_quality_runs:
+        place_quality(range(7))
 
     strength_pref = [0, 2, 4, 3]  # Mon, Wed, Fri, Thu — fill rest-or-easy slots
-    placed_s = 0
+    placed_s = sum(1 for kind in types if kind == STRENGTH)
+
+    def place_strength(weekday: int) -> None:
+        nonlocal placed_s
+        if weekday in locked or types[weekday] in {LONG_RUN, INTERVALS, TEMPO}:
+            return
+        if types[weekday] == REST and prefs.weekly_rest_days <= placed_s:
+            return
+        if types[weekday] not in {EASY_RUN, REST}:
+            return
+        types[weekday] = STRENGTH
+        placed_s += 1
+
     for wd in strength_pref:
         if placed_s >= prefs.weekly_strength:
             break
-        if types[wd] in {LONG_RUN, INTERVALS}:
-            continue
-        if types[wd] == REST and prefs.weekly_rest_days <= placed_s:
-            continue
-        if types[wd] == REST:
-            types[wd] = STRENGTH
-            placed_s += 1
-            continue
-        types[wd] = STRENGTH
-        placed_s += 1
+        place_strength(wd)
     if placed_s < prefs.weekly_strength:
         for wd in range(7):
             if placed_s >= prefs.weekly_strength:
                 break
-            if types[wd] in {EASY_RUN, REST}:
-                types[wd] = STRENGTH
-                placed_s += 1
+            place_strength(wd)
     return types
 
 
@@ -365,9 +393,11 @@ def build_skeleton(
     sessions: list[Session],
     feeling: str | None = None,
     last_compliance: str | None = None,
+    locks: dict[int, str] | None = None,
 ) -> list[PlanDay]:
     end = end_of_plan(today, prefs)
-    template = week_template(prefs)
+    locks = {int(weekday): kind for weekday, kind in (locks or {}).items() if kind}
+    template = week_template(prefs, locks)
     last_q = _last_quality(sessions)
     last_q_type = last_q.session_type if last_q else None
     n_weeks = max(1, (end - today).days // 7 + 1)
@@ -378,12 +408,18 @@ def build_skeleton(
         day = today + timedelta(days=offset)
         phase = phase_for(day, prefs)
         week_index = max(0, (day - week0).days // 7)
+        race_day = day == prefs.race_date and prefs.has_race
         raw = template[day.weekday()]
-        if day == prefs.race_date and prefs.has_race:
+        source = "lock" if day.weekday() in locks else "skeleton"
+        if race_day:
             raw = LONG_RUN
             phase = "race"
-        if raw == INTERVALS:
-            kind = _quality_for_week(week_index + quality_seen, last_q_type)
+            source = "skeleton"
+        if raw in QUALITY:
+            if source == "lock":
+                kind = raw
+            else:
+                kind = _quality_for_week(week_index + quality_seen, last_q_type)
             quality_seen += 1
             if kind == TEMPO:
                 structure, center = tempo_structure(
@@ -440,6 +476,7 @@ def build_skeleton(
                 pace_max=pace_max,
                 structure=structure,
                 phase=phase,
+                source=source,
             )
         )
     return days
