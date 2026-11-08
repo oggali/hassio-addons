@@ -28,7 +28,7 @@ class Settings:
     evening_time: str = "20:30"
     oura_wait_minutes: int = 90
     poll_seconds: int = 60
-    notify_service: str = "notify.tg_oskari"
+    notify_service: str = "notify.telegram_bot_5606541988_90421249"
     mobile_notify_service: str = ""
     run_immediately: bool = True
     strava_entity_prefix: str = "sensor.strava_oskari_vuorinen"
@@ -49,10 +49,6 @@ class Settings:
         return bool(value) and value not in {"null", "none", "unknown", "false"}
 
     @property
-    def notify_domain_service(self) -> tuple[str, str]:
-        return _split_service(self.notify_service, "notify")
-
-    @property
     def mobile_domain_service(self) -> tuple[str, str] | None:
         if not self.mobile_enabled:
             return None
@@ -66,7 +62,9 @@ class Settings:
             evening_time=os.environ.get("EVENING_TIME", "20:30"),
             oura_wait_minutes=_env_int("OURA_WAIT_MINUTES", 90),
             poll_seconds=_env_int("POLL_SECONDS", 60),
-            notify_service=os.environ.get("NOTIFY_SERVICE", "notify.tg_oskari"),
+            notify_service=os.environ.get(
+                "NOTIFY_SERVICE", "notify.telegram_bot_5606541988_90421249"
+            ),
             mobile_notify_service=os.environ.get("MOBILE_NOTIFY_SERVICE", "") or "",
             run_immediately=_env_bool("RUN_IMMEDIATELY", True),
             strava_entity_prefix=os.environ.get(

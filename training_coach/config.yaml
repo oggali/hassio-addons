@@ -1,5 +1,5 @@
 name: Training Coach
-version: "2026.11.06.1" #calendar versioning, .x only when more than 1 patch release in same day, first one yyyy.mm.dd
+version: "2026.11.08" #calendar versioning, .x only when more than 1 patch release in same day, first one yyyy.mm.dd
 slug: training_coach
 description: "Morning and evening training coach from Oura, Garmin, and Strava, with live race prefs and Telegram."
 arch:
@@ -19,7 +19,7 @@ options:
   evening_time: "20:30"
   oura_wait_minutes: 90
   poll_seconds: 60
-  notify_service: "notify.tg_oskari"
+  notify_service: "notify.telegram_bot_5606541988_90421249"
   mobile_notify_service: "notify.mobile_app_galaxys26"
   run_immediately_on_start: true
   strava_entity_prefix: "sensor.strava_oskari_vuorinen"

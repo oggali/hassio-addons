@@ -161,7 +161,7 @@ Use your real add-on slug if it differs. After wipe, the next plan run re-seeds 
 | `evening_time` | `20:30` | Evening recap |
 | `oura_wait_minutes` | `90` | How long after `run_time` to wait for Oura and a Garmin wake. The wait is at least 3 hours. |
 | `poll_seconds` | `60` | Oura wait + helper poll interval |
-| `notify_service` | `notify.tg_oskari` | Telegram (always used, morning and evening) |
+| `notify_service` | `notify.telegram_bot_5606541988_90421249` | Telegram notify entity. Morning and evening call `telegram_bot.send_message` with `parse_mode: plain_text`. |
 | `mobile_notify_service` | *(empty)* | Optional, e.g. `notify.mobile_app_galaxys26` |
 | `run_immediately_on_start` | `true` | Plan once on startup. Notifies only if today’s morning slot already passed and that notify was not sent; that notify uses the same wake wait. |
 | `strava_entity_prefix` | `sensor.strava_oskari_vuorinen` | Prefix for recent-activity sensors |

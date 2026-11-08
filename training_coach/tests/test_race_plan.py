@@ -371,7 +371,7 @@ class FeedbackTests(unittest.TestCase):
         store.get_feedback.return_value = {"feeling": "ok", "day": date(2026, 9, 12)}
         client = MagicMock()
         settings = Settings(
-            notify_service="notify.tg_oskari",
+            notify_service="notify.telegram_bot_5606541988_90421249",
             mobile_notify_service="notify.mobile_app_galaxys26",
         )
         handle_mobile_action(
@@ -456,15 +456,22 @@ class FeedbackTests(unittest.TestCase):
         client = MagicMock()
         notify_plan(
             client,
-            Settings(notify_service="notify.tg_oskari", mobile_notify_service=""),
+            Settings(
+                notify_service="notify.telegram_bot_5606541988_90421249",
+                mobile_notify_service="",
+            ),
             plan,
             weekly_load=186.4,
         )
-        payload = client.call_service.call_args.args[2]
+        domain, service, payload = client.call_service.call_args.args
+        self.assertEqual(domain, "telegram_bot")
+        self.assertEqual(service, "send_message")
+        self.assertEqual(payload["entity_id"], "notify.telegram_bot_5606541988_90421249")
+        self.assertEqual(payload["parse_mode"], "plain_text")
+        self.assertNotIn("data", payload)
         self.assertIn("Training load: 7-day 186.4.", payload["message"])
         self.assertNotIn("today ", payload["message"])
         self.assertIn("Upcoming:\nSun: long run 14–16 km", payload["message"])
-        self.assertEqual(payload["data"], {"parse_mode": "plain_text"})
 
     def test_telegram_plain_text_does_not_change_android_data(self):
         client = MagicMock()
@@ -472,7 +479,7 @@ class FeedbackTests(unittest.TestCase):
         notify_message(
             client,
             Settings(
-                notify_service="notify.tg_oskari",
+                notify_service="notify.telegram_bot_5606541988_90421249",
                 mobile_notify_service="notify.mobile_app_galaxys26",
             ),
             "Training coach evening",
@@ -480,7 +487,12 @@ class FeedbackTests(unittest.TestCase):
             android_data=android_data,
         )
         calls = {call.args[1]: call.args[2] for call in client.call_service.call_args_list}
-        self.assertEqual(calls["tg_oskari"]["data"], {"parse_mode": "plain_text"})
+        self.assertEqual(calls["send_message"]["parse_mode"], "plain_text")
+        self.assertEqual(
+            calls["send_message"]["entity_id"],
+            "notify.telegram_bot_5606541988_90421249",
+        )
+        self.assertNotIn("data", calls["send_message"])
         self.assertEqual(calls["mobile_app_galaxys26"]["data"], android_data)
         self.assertNotIn("parse_mode", calls["mobile_app_galaxys26"])
 

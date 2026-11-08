@@ -473,16 +473,18 @@ def notify_message(
     android: bool = True,
 ) -> None:
     if telegram:
-        domain, service = settings.notify_domain_service
-        # Legacy Markdown treats an unmatched "_" as italics and rejects the send.
+        # notify.send_message cannot set a parser. Legacy Markdown treats an
+        # unmatched "_" as italics and Telegram rejects the send.
+        entity_id = settings.notify_service.strip()
         payload = {
+            "entity_id": entity_id,
             "message": message,
             "title": title,
-            "data": {"parse_mode": "plain_text"},
+            "parse_mode": "plain_text",
         }
         try:
-            client.call_service(domain, service, payload)
-            log(f"Notified via {domain}.{service}")
+            client.call_service("telegram_bot", "send_message", payload)
+            log(f"Notified via telegram_bot.send_message {entity_id}")
         except Exception as exc:  # noqa: BLE001
             log(f"Notify failed: {exc}")
     if android and settings.mobile_domain_service:

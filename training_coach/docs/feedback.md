@@ -4,7 +4,7 @@
 
 Evening compares the morning plan with every training session logged today, stores a row, and sends Telegram. It does not pick tomorrow’s session. Recovery is not known yet. The categories below are the ones later planning actually reads.
 
-Code: [`feedback.py`](../app/feedback.py), option lists in [`goal.py`](../app/goal.py#L24-L27), storage in [`feedback_history`](../app/store.py#L154-L166). The evening call is [`run_evening`](../app/main.py#L754-L840).
+Code: [`feedback.py`](../app/feedback.py), option lists in [`goal.py`](../app/goal.py#L24-L27), storage in [`feedback_history`](../app/store.py#L154-L166). The evening call is [`run_evening`](../app/main.py#L756-L842).
 
 ## Two different answers
 
@@ -18,14 +18,14 @@ Code: [`feedback.py`](../app/feedback.py), option lists in [`goal.py`](../app/go
 
 Evening writes `compliance` from the log. A button or a `checkin` can replace that value afterwards:
 
-- Android **Did it** stores `match`. **Changed** stores `substituted`. **Skipped** stores `skipped` ([`handle_mobile_action`](../app/main.py#L925-L932)).
-- Stdin `did_plan` `skipped` stores `skipped`, and `modified` stores `substituted`. `yes` leaves the evening compliance in place ([`apply_checkin`](../app/main.py#L842-L856)).
+- Android **Did it** stores `match`. **Changed** stores `substituted`. **Skipped** stores `skipped` ([`handle_mobile_action`](../app/main.py#L927-L934)).
+- Stdin `did_plan` `skipped` stores `skipped`, and `modified` stores `substituted`. `yes` leaves the evening compliance in place ([`apply_checkin`](../app/main.py#L844-L858)).
 
 Feeling, skip reason, and effort fit do not change `compliance`. The ladder and the Monte Carlo search read the stored compliance, so a tap is what they see later.
 
-Setting the helpers by hand is copied into today’s row on the helper poll ([`capture_feedback_helpers`](../app/main.py#L652-L680)). `did_plan` `skipped` and `modified` overwrite compliance the same way as the buttons. `yes` keeps the evening compliance, or stores `match` when that row had none.
+Setting the helpers by hand is copied into today’s row on the helper poll ([`capture_feedback_helpers`](../app/main.py#L654-L682)). `did_plan` `skipped` and `modified` overwrite compliance the same way as the buttons. `yes` keeps the evening compliance, or stores `match` when that row had none.
 
-A late run after evening can upgrade yesterday’s `skipped` row the next morning when a session has shown up ([`reconcile_yesterday`](../app/main.py#L632-L649)).
+A late run after evening can upgrade yesterday’s `skipped` row the next morning when a session has shown up ([`reconcile_yesterday`](../app/main.py#L634-L651)).
 
 ## Compliance
 
