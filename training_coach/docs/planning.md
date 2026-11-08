@@ -4,7 +4,7 @@
 
 Recovery wins over both paths below. Session types are in [Session categories](sessions.md). The recovery vote is in [Recovery bands](recovery.md). Load numbers are in [Training load](load.md).
 
-Morning always rebuilds a skeleton and replaces `plan_days` ([`rebuild_calendar`](../app/main.py#L332-L366)). Today’s published session uses that row when a race is set, and also when today is a weekday lock (`run_once` in [`main.py`](../app/main.py#L683-L752)). The upcoming-week list on the session sensor is the skeleton either way.
+Morning always rebuilds a skeleton and replaces `plan_days` ([`rebuild_calendar`](../app/main.py#L332-L366)). Today’s published session uses that row when a race is set, and also when today is a weekday lock (`run_once` in [`main.py`](../app/main.py#L685-L754)). The upcoming-week list on the session sensor is the skeleton either way.
 
 ## No race
 

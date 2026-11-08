@@ -55,7 +55,7 @@ Update this `AGENTS.md` in the same change when you add or rename a module, chan
 
 Stdin (`hassio.addon_stdin`): `wipe_db`, `fetch_sessions`, `set_prefs`, `set_locks`, `checkin`. JSON objects are accepted; a body with `feeling` or `did_plan` and no `cmd` is a check-in, otherwise `set_prefs`. `set_locks` updates only the weekday keys it contains (`mon`…`sun`) and pushes the same values to the lock dropdowns. `wipe_db` deletes the live database and re-seeds history (365 days) on the next plan. `fetch_sessions` upserts current sensors and refreshes the share copy; it does not notify or rebuild the plan.
 
-Telegram (`notify_service`) is always used. Each Telegram send sets `data.parse_mode` to `plain_text`. The bot default is legacy Markdown, and an unmatched `_` (as in `same_family`) makes Telegram reject the message. Android (`mobile_notify_service`) is optional. Empty, `null`, `none`, `unknown`, or `false` disables it and the websocket listener.
+Telegram (`notify_service`) is the notify entity for one chat. Each send calls `telegram_bot.send_message` with that entity as `entity_id` and `parse_mode` `plain_text`. `notify.send_message` cannot set a parser. The bot default is legacy Markdown, and an unmatched `_` (as in `same_family`) makes Telegram reject the message. Android (`mobile_notify_service`) is optional. Empty, `null`, `none`, `unknown`, or `false` disables it and the websocket listener.
 
 ## Morning path
 
@@ -117,4 +117,4 @@ python3 -m unittest discover -s training_coach/tests -v
 | `test_schedule.py` | Morning/evening/share slot firing. |
 | `test_ha_ws.py` | Websocket URL and action-day parsing. |
 
-A PR that touches this directory must bump `version` in `config.yaml` (see the repo root `AGENTS.md`). Personal defaults (`notify.tg_oskari`, `sensor.strava_oskari_vuorinen`, `Europe/Helsinki`) stay unless the task is to change them.
+A PR that touches this directory must bump `version` in `config.yaml` (see the repo root `AGENTS.md`). Personal defaults (`notify.telegram_bot_5606541988_90421249`, `sensor.strava_oskari_vuorinen`, `Europe/Helsinki`) stay unless the task is to change them.
