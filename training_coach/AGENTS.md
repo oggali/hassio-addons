@@ -4,10 +4,7 @@ Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA,
 
 Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant shell: loop, helpers, DuckDB, and the websocket. The shell has no `__init__.py`. `main.py` inserts `app/` on `sys.path` and imports shell modules by filename (`from store import CoachStore`). Rule modules are `from coach.planner import plan_day` and the same for the rest of `coach`. Keep new shell modules flat. Shared rule changes belong in `training-coach/core`. This directory is a copy, not a live symlink: the image build cannot see the other checkout.
 
-`training_coach/scripts/sync_core.py` copies `../training-coach/core` (or `COACH_CORE_SRC`, or `/home/oskari/git/training-coach/core`) over `core/`. `training_coach/scripts/pre-commit` runs that copy when a commit already includes `training_coach/`, then stages `core/`. A commit that does not touch this add-on does not refresh it. Install the hook with `cp training_coach/scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`. If the copy changes `core/` and `config.yaml` `version` is not staged, the hook stops the commit. The commit recorded in `core/UPSTREAM` is the source checkout's `HEAD`. Two add-on-only edits are written back after every copy:
-
-- `garmin_recovery_hours` accepts hour and minute unit names (`hours`, `hr`, `minutes`, and the rest). Upstream `test_garmin_recovery_hours_are_hours_above_48` checks the API path: `recovery_from_signals` tags `garmin_recovery_hours` as `h`, so 72 stays 72 and still produces the poor-vote reason. The API does not read a Home Assistant sensor. This add-on does, in `features.py`, and a Garmin sensor unit of `hours` is not the string `h`. That parsing is not an upstream change.
-- `Settings.notify_service` keeps this install's Telegram entity.
+`training_coach/scripts/sync_core.py` copies `../training-coach/core` (or `COACH_CORE_SRC`, or `/home/oskari/git/training-coach/core`) over `core/`. `training_coach/scripts/pre-commit` runs that copy when a commit already includes `training_coach/`, then stages `core/`. A commit that does not touch this add-on does not refresh it. Install the hook with `cp training_coach/scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`. If the copy changes `core/` and `config.yaml` `version` is not staged, the hook stops the commit. The commit recorded in `core/UPSTREAM` is the source checkout's `HEAD`. One add-on-only edit is written back after every copy: `Settings.notify_service` keeps this install's Telegram entity. Garmin recovery units, including a sensor unit of `hours`, come from that checkout and are not patched again here.
 
 `app/backup/` is the previous copy of the rule modules. Nothing in the running process imports it.
 
@@ -16,10 +13,10 @@ Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant 
 | Path | Role |
 |---|---|
 | `config.yaml` | Add-on manifest. Ops options only (timezone, clocks, notify services, Strava prefix, long-run minutes, max heart rate). Race goal and weekly caps are not options: changing options restarts the container. |
-| `build.yaml`, `Dockerfile` | `ghcr.io/hassio-addons/debian-base`, Python 3. The image copies `core/` to `/core` and runs `pip install -r app/requirements.txt`. That file installs `requests`, `duckdb`, `websocket-client`, and `../core`. |
+| `build.yaml`, `Dockerfile` | `ghcr.io/hassio-addons/debian-base`, Python 3. The image copies `core/` to `/core`, sets the working directory to `/app`, and runs `pip install -r requirements.txt`. That file installs `requests`, `duckdb`, `websocket-client`, and `../core`. pip resolves that relative path from the working directory. |
 | `run.sh` | `bashio` config → environment variables → `python3 /app/main.py`. |
 | `core/` | Copy of `training-coach/core`, refreshed by `scripts/sync_core.py`. Installed package name `coach`. |
-| `scripts/sync_core.py` | Copy that checkout, then reapply the two add-on-only edits. |
+| `scripts/sync_core.py` | Copy that checkout, then reapply this install's Telegram notify entity. |
 | `scripts/pre-commit` | Git hook: refresh `core/` when the commit touches this add-on. |
 | `core/src/coach/settings.py` | `Settings.from_env()`. Ops knobs only. |
 | `core/src/coach/entities.py` | HA entity ids: Oura, Garmin, Strava slots, coach sensors, input helpers. |
