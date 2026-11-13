@@ -68,7 +68,8 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(by_title["Gym"].laps)
         self.assertEqual(by_title["Track intervals"].started_at, started)
         self.assertEqual(by_title["Track intervals"].relative_effort, 68.0)
-        self.assertAlmostEqual(by_title["Track intervals"].session_load, 45 * 0.95)
+        # Suffer score 68 over 45 min is above 1.2 per minute, so the impulse clamps there.
+        self.assertAlmostEqual(by_title["Track intervals"].session_load, 45 * 1.2)
         self.assertAlmostEqual(by_title["Gym"].session_load, 50 * 0.4)
         # Banister traceback: gym day 1, intervals day 2 (overnight decay, then hard load).
         self.assertIsNotNone(by_title["Gym"].ctl_before)

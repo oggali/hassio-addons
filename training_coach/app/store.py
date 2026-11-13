@@ -268,7 +268,7 @@ class CoachStore:
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )
 
-    def upsert_sessions(self, sessions: list[Session]) -> int:
+    def upsert_sessions(self, sessions: list[Session], hr_max: float | None = None) -> int:
         now = datetime.now(timezone.utc)
         count = 0
         for session in sessions:
@@ -279,7 +279,7 @@ class CoachStore:
             laps_json = None
             if session.laps:
                 laps_json = json.dumps(session.laps, ensure_ascii=False)
-            load = session_load(session)
+            load = session_load(session, hr_max)
             session.session_load = load
             existing = self._conn.execute(
                 "SELECT captured_at FROM sessions WHERE session_key = ?",
@@ -326,12 +326,15 @@ class CoachStore:
             )
             count += 1
         if count:
-            self.recompute_session_load_trace()
+            self.recompute_session_load_trace(hr_max)
         return count
 
-    def recompute_session_load_trace(self) -> int:
+    def recompute_session_load_trace(self, hr_max: float | None = None) -> int:
         """Re-walk all dated sessions and persist CTL/ATL before→after per row."""
         sessions = self.load_sessions()
+        if hr_max is not None:
+            for session in sessions:
+                session.session_load = session_load(session, hr_max)
         annotate_session_banister(sessions)
         now = datetime.now(timezone.utc)
         updated = 0
@@ -880,6 +883,28 @@ class CoachStore:
             }
             for row in rows
         ]
+
+    def load_readiness(self) -> list[dict[str, Any]]:
+        """Mornings the fatigue modifier can read. Resting heart rate is not stored."""
+        rows = self._conn.execute(
+            """
+            SELECT day, oura_hrv_balance, garmin_hrv_ratio, oura_temp
+            FROM recovery_daily
+            ORDER BY day
+            """
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item: dict[str, Any] = {"day": _as_date(row[0])}
+            if row[1] is not None:
+                item["hrv_balance"] = row[1]
+            if row[2] is not None:
+                item["hrv_ratio"] = row[2]
+            if row[3] is not None:
+                item["temp_dev"] = row[3]
+            if len(item) > 1:
+                out.append(item)
+        return out
 
     def load_recovery_bands(self, since: date | None = None) -> list[str]:
         if since is None:

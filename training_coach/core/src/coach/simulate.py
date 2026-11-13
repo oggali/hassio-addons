@@ -15,7 +15,7 @@ import random
 
 from coach.classify import HARD_OR_LONG, LONG_RUN, QUALITY
 from coach.goal import Prefs
-from coach.load import LoadSnapshot, long_run_floor_km
+from coach.load import ATL_TAU, CTL_TAU, INTENSITY, LoadSnapshot, long_run_floor_km
 from coach.paces import PaceSet, riegel
 from coach.periodize import LONG_WEEKLY_GROWTH, PlanDay
 
@@ -34,15 +34,15 @@ DEFAULT_SKIP_P = 0.12
 TSB_OVERREACH = -25.0
 
 
-def _day_factor(rng: random.Random) -> float:
+def _day_factor(rng: random.Random, rel_var: float = REL_VAR) -> float:
     u = rng.random()
     if u < PROB_NORMAL:
-        return rng.gauss(0.0, 0.4 * REL_VAR)
+        return rng.gauss(0.0, 0.4 * rel_var)
     if u < PROB_NORMAL + PROB_OFF:
-        return abs(rng.gauss(0.0, 0.6 * REL_VAR))
+        return abs(rng.gauss(0.0, 0.6 * rel_var))
     if rng.random() < 0.3:
-        return -abs(rng.gauss(0.0, 0.8 * REL_VAR))
-    return min(abs(rng.gauss(0.0, REL_VAR * 1.2)), 0.25)
+        return -abs(rng.gauss(0.0, 0.8 * rel_var))
+    return min(abs(rng.gauss(0.0, rel_var * 1.2)), 0.25)
 
 
 def finish_distribution(
@@ -51,7 +51,9 @@ def finish_distribution(
     *,
     seed: int = 1,
     sims: int = MC_FINISH,
+    rel_var: float | None = None,
 ) -> dict:
+    spread = rel_var if rel_var and rel_var > 0 else REL_VAR
     rng = random.Random(seed)
     target_km = prefs.race_km
     p50 = paces.predicted_s
@@ -65,7 +67,7 @@ def finish_distribution(
             "p_hit": None,
             "feasible": True,
         }
-    samples = [p50 * (1.0 + _day_factor(rng)) for _ in range(sims)]
+    samples = [p50 * (1.0 + _day_factor(rng, spread)) for _ in range(sims)]
     samples.sort()
 
     def pct(p: float) -> float:
@@ -86,6 +88,7 @@ def finish_distribution(
         "p_hit": hit,
         "feasible": feasible,
         "samples": sims,
+        "rel_var": spread,
     }
 
 
@@ -246,6 +249,32 @@ def _safe_volume(
     return out
 
 
+def _planned_impulse(day: PlanDay, pace: float) -> float:
+    if day.session_type in {None, "rest"}:
+        return 0.0
+    km = (day.km_min + day.km_max) / 2.0
+    if km > 0 and pace > 0:
+        minutes = km * pace
+    elif day.session_type == "strength":
+        minutes = 40.0
+    else:
+        minutes = 0.0
+    return minutes * INTENSITY.get(day.session_type, 0.5)
+
+
+def _projected_form(days: list[PlanDay], load: LoadSnapshot, paces: PaceSet) -> float:
+    """Form at the end of the candidate, with the personal fatigue gain on ATL."""
+    pace = (paces.easy_min + paces.easy_max) / 2.0 if paces else 6.0
+    ctl = load.ctl
+    atl = load.atl
+    gain = load.fatigue_gain or 1.0
+    for day in days:
+        impulse = _planned_impulse(day, pace)
+        ctl += (impulse - ctl) / CTL_TAU
+        atl += (impulse - atl) / ATL_TAU
+    return ctl - gain * atl
+
+
 def _score_plan(
     days: list[PlanDay],
     load: LoadSnapshot,
@@ -288,7 +317,8 @@ def _score_plan(
     for a, b in zip(weeks, weeks[1:]):
         if weekly[a] > 1 and weekly[b] > weekly[a] * 1.15:
             overreach += 1.2
-    if load.tsb < TSB_OVERREACH:
+    projected = _projected_form(days, load, paces)
+    if projected < TSB_OVERREACH:
         overreach += 0.8
     time_score = 0.0
     if finish.get("p50"):

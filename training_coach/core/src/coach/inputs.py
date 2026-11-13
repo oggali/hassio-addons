@@ -197,7 +197,7 @@ def session_from_row(
         session.session_type = classify_logged_session(
             session, long_run_min_minutes, hr_max
         )
-    session.session_load = session_load(session)
+    session.session_load = session_load(session, hr_max)
     return session
 
 

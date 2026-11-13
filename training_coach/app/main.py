@@ -8,6 +8,7 @@ import select
 import sys
 import threading
 import time
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -49,8 +50,10 @@ from coach.feedback import (
 from coach.goal import Prefs, days_to_race, format_hms, phase_for
 from ha_client import HomeAssistantClient
 from ha_ws import parse_action_day, run_action_listener, websocket_url
+from coach.backtest import backtest_report
 from coach.load import build_load_snapshot
 from coach.paces import build_paces, format_pace_range
+from coach.performance import fit_fatigue_gain, readiness_factor
 from coach.parse import attr, first_entity, state_value
 from coach.periodize import PlanDay, build_skeleton
 from coach.planner import Plan, plan_day
@@ -277,7 +280,7 @@ def seed_history(
     sessions = collect_live_sessions(
         states, settings, history=history, split_history=split_hist, hr_max=hr_max
     )
-    n = store.upsert_sessions(sessions)
+    n = store.upsert_sessions(sessions, hr_max=hr_max)
     store.mark_history_seeded()
     log(f"Seeded {n} sessions from HA history ({settings.history_seed_days}d lookback)")
     return n
@@ -341,9 +344,22 @@ def rebuild_calendar(
     prefs: Prefs,
     feeling: str | None,
     locks: dict[int, str] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[list[PlanDay], Any, Any, dict]:
+    feedback = store.load_feedback(since=snapshot.today - timedelta(days=120))
+    hr_max = float(settings.max_heart_rate) if settings is not None else None
     load = build_load_snapshot(snapshot.sessions, snapshot.today)
-    paces = build_paces(snapshot.sessions, prefs, snapshot.today)
+    gain = fit_fatigue_gain(snapshot.sessions, feedback, snapshot.today, hr_max)
+    gain *= readiness_factor(
+        snapshot.sessions,
+        store.load_readiness(),
+        snapshot.today,
+        hr_max,
+        feedback,
+    )
+    gain = min(1.8, max(0.6, gain))
+    load = replace(load, fatigue_gain=gain)
+    paces = build_paces(snapshot.sessions, prefs, snapshot.today, feedback)
     last_compliance = None
     for session in sorted(snapshot.sessions, key=lambda s: s.when or date.min, reverse=True):
         if session.session_type in {"intervals", "tempo"} and session.when:
@@ -363,8 +379,17 @@ def rebuild_calendar(
         last_compliance,
         locks,
     )
-    finish = finish_distribution(paces, prefs, seed=int(prefs.fingerprint[:8], 16) % 100000)
-    feedback = store.load_feedback(since=snapshot.today - timedelta(days=120))
+    report = backtest_report(snapshot.sessions, feedback, prefs, snapshot.today, hr_max)
+    finish = finish_distribution(
+        paces,
+        prefs,
+        seed=int(prefs.fingerprint[:8], 16) % 100000,
+        rel_var=report.get("rel_var"),
+    )
+    if finish.get("p50"):
+        finish["coverage"] = report.get("coverage")
+        finish["baseline_coverage"] = report.get("baseline_coverage")
+        finish["backtest"] = report
     chosen = search_calendar(skeleton, load, prefs, paces, feedback, finish)
     store.replace_plan_days([d.as_dict() for d in chosen])
     store.set_meta("plan_fingerprint", prefs.fingerprint)
@@ -598,7 +623,7 @@ def reclassify_stored_sessions(store: CoachStore, settings: Settings, hr_max: fl
             session.session_type = new_type
             changed.append(session)
     if changed:
-        store.upsert_sessions(changed)
+        store.upsert_sessions(changed, hr_max=hr_max)
     return len(changed)
 
 
@@ -622,7 +647,7 @@ def ingest(
     if hr_live != hr_max:
         hr_max, _how = hr_live, how_live
         live = collect_live_sessions(states, settings, hr_max=hr_max)
-    store.upsert_sessions(live)
+    store.upsert_sessions(live, hr_max=hr_max)
     log_upserted_sessions(live)
     if store.needs_history_seed():
         seed_history(client, settings, store, hr_max=hr_max)
@@ -705,7 +730,9 @@ def run_once(
         prefs = store.insert_prefs(prefs if changed else Prefs.defaults())
     last_fb = store.get_feedback(snapshot.today - timedelta(days=1)) or {}
     feeling = last_fb.get("feeling")
-    calendar, load, paces, finish = rebuild_calendar(store, snapshot, prefs, feeling, locks)
+    calendar, load, paces, finish = rebuild_calendar(
+        store, snapshot, prefs, feeling, locks, settings
+    )
     today_row = next((day for day in calendar if day.day == snapshot.today), None)
     if today_row is not None and not (prefs.has_race or today_row.source == "lock"):
         today_row = None

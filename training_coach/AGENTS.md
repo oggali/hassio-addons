@@ -25,8 +25,10 @@ Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant 
 | `core/src/coach/classify.py` | Session types and Strava/Garmin → `Session`. Same-outing merge. |
 | `core/src/coach/splits.py` | `sensor.strava_latest_splits` (km splits, laps, relative effort) reclassifies a matched run and copies laps onto the session. |
 | `core/src/coach/features.py` | Recovery band, fused day activity, `FeatureSnapshot`. |
-| `core/src/coach/load.py` | Session load and Banister CTL / ATL / TSB. Running volume only. |
-| `core/src/coach/paces.py` | Easy pace from history, Riegel `k`, predicted finish. |
+| `core/src/coach/load.py` | Systemic impulse, CTL / ATL / TSB, `running_ctl`. Running volume only. |
+| `core/src/coach/performance.py` | Pace at a heart rate, the fatigue gain, the pace nudge, the readiness factor. |
+| `core/src/coach/backtest.py` | Next-21-day score of the easy-pace forecast and the published interval. |
+| `core/src/coach/paces.py` | Easy pace from history, check-in nudge, Riegel `k`, predicted finish. |
 | `core/src/coach/periodize.py` | Remaining-day skeleton, interval/tempo ladders, km and pace ranges. |
 | `core/src/coach/simulate.py` | Finish-time Monte Carlo (P10/P50/P90) and a small search over remaining days. |
 | `core/src/coach/planner.py` | Today's session. Recovery overrides the calendar. |
@@ -38,7 +40,7 @@ Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant 
 | `app/prefs.py` | Create helpers if missing, poll them, append `prefs_history`. |
 | `app/store.py` | DuckDB schema, upserts, share copy, wipe. `SCHEMA_VERSION` is `"9"`. |
 | `app/persist.py` | Empty shim. Call `CoachStore`, not this module. |
-| `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. Logs `coach.__file__` at startup. |
+| `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. The morning rebuild fits the fatigue gain before the calendar search. Logs `coach.__file__` at startup. |
 | `app/backup/` | Previous rule modules. Not imported. |
 | `tests/` | `unittest`. No Home Assistant. Fixture states in `test_planner.py`. `tests/_path.py` puts `core/src` and `app/` on `sys.path`. |
 | `docs/` | Rule pages linked from `README.md`. Update the page that owns a rule in the same change. |
@@ -51,7 +53,7 @@ Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant 
 | `docs/feedback.md` | Compliance, helper options, Android buttons, what the next plan reads. |
 | `docs/recovery.md` | `poor` / `ok` / `good` votes. |
 | `docs/planning.md` | Quota picker, race skeleton, phases, ladders, paces, Monte Carlo search. |
-| `docs/load.md` | Intensity, CTL / ATL / TSB, running volume, long-run floor. |
+| `docs/load.md` | Impulse, CTL / ATL / TSB, fatigue gain, running volume, long-run floor. |
 | `docs/notifications.md` | Morning and evening message text, including the training-load lines. |
 
 ## Keep this file current
