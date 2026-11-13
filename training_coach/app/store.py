@@ -18,7 +18,7 @@ from coach.parse import coerce_date
 from coach.planner import Plan
 from coach.settings import Settings
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 
 def _as_date(value: Any) -> date | None:
@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     max_hr DOUBLE,
     source VARCHAR NOT NULL,
     splits_json VARCHAR,
+    laps_json VARCHAR,
     relative_effort DOUBLE,
     session_load DOUBLE,
     ctl_before DOUBLE,
@@ -225,6 +226,8 @@ class CoachStore:
                 self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} DOUBLE")
         if "captured_at" not in session_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN captured_at TIMESTAMP")
+        if "laps_json" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN laps_json VARCHAR")
         feedback_cols = {
             row[1]
             for row in self._conn.execute("PRAGMA table_info('feedback_history')").fetchall()
@@ -273,6 +276,9 @@ class CoachStore:
             splits_json = None
             if session.splits is not None:
                 splits_json = json.dumps(session.splits, ensure_ascii=False)
+            laps_json = None
+            if session.laps:
+                laps_json = json.dumps(session.laps, ensure_ascii=False)
             load = session_load(session)
             session.session_load = load
             existing = self._conn.execute(
@@ -287,10 +293,10 @@ class CoachStore:
                 INSERT OR REPLACE INTO sessions (
                     session_key, activity_id, session_type, title, sport, when_day,
                     started_at, duration_min, distance_m, avg_hr, max_hr, source,
-                    splits_json, relative_effort, session_load,
+                    splits_json, laps_json, relative_effort, session_load,
                     ctl_before, atl_before, ctl_after, atl_after, tsb_after,
                     updated_at, captured_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     key,
@@ -306,6 +312,7 @@ class CoachStore:
                     session.max_hr,
                     session.source,
                     splits_json,
+                    laps_json,
                     session.relative_effort,
                     load,
                     session.ctl_before,
@@ -358,7 +365,7 @@ class CoachStore:
                 """
                 SELECT activity_id, session_type, title, sport, when_day, started_at,
                        duration_min, distance_m, avg_hr, max_hr, source, splits_json,
-                       relative_effort, session_load,
+                       laps_json, relative_effort, session_load,
                        ctl_before, atl_before, ctl_after, atl_after, tsb_after
                 FROM sessions
                 ORDER BY when_day DESC NULLS LAST, started_at DESC NULLS LAST
@@ -369,7 +376,7 @@ class CoachStore:
                 """
                 SELECT activity_id, session_type, title, sport, when_day, started_at,
                        duration_min, distance_m, avg_hr, max_hr, source, splits_json,
-                       relative_effort, session_load,
+                       laps_json, relative_effort, session_load,
                        ctl_before, atl_before, ctl_after, atl_after, tsb_after
                 FROM sessions
                 WHERE when_day IS NULL OR when_day >= ?
@@ -382,6 +389,9 @@ class CoachStore:
             splits = None
             if row[11]:
                 splits = json.loads(row[11])
+            laps = None
+            if row[12]:
+                laps = json.loads(row[12])
             started_at = _as_datetime(row[5])
             out.append(
                 Session(
@@ -396,14 +406,15 @@ class CoachStore:
                     max_hr=row[9],
                     source=row[10],
                     splits=splits,
+                    laps=laps,
                     started_at=started_at,
-                    relative_effort=row[12],
-                    session_load=row[13],
-                    ctl_before=row[14],
-                    atl_before=row[15],
-                    ctl_after=row[16],
-                    atl_after=row[17],
-                    tsb_after=row[18],
+                    relative_effort=row[13],
+                    session_load=row[14],
+                    ctl_before=row[15],
+                    atl_before=row[16],
+                    ctl_after=row[17],
+                    atl_after=row[18],
+                    tsb_after=row[19],
                 )
             )
         return out

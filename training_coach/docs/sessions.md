@@ -56,7 +56,7 @@ Run and cross heart-rate steps divide by one personal max, [`reference_max_hr`](
 
 The log line is `Heart-rate reference N bpm (setup)`, `setup raised by a session max`, or `rolling 6 months`.
 
-On the same ingest, stored run and cross rows are classified again with that reference ([`classify_logged_session`](../core/src/coach/classify.py#L490-L528)). Title words and stored kilometre splits still win, so an interval workout stays `intervals`. Session load and the CTL/ATL trace update when a type changes. The evening `feedback_history` row stays the text that was sent that night.
+On the same ingest, stored run and cross rows are classified again with that reference ([`classify_logged_session`](../core/src/coach/classify.py#L490-L528)). Title words and stored kilometre splits and laps still win, so an interval workout stays `intervals` after the Strava splits sensor has moved on. Session load and the CTL/ATL trace update when a type changes. The evening `feedback_history` row stays the text that was sent that night.
 
 A steady 61-minute run averaging 148, with a peak of 159 on that outing, is `easy_run` when the reference is 195 (148 / 195 = 0.76).
 
@@ -96,7 +96,7 @@ Order:
 
 ## Splits
 
-`sensor.strava_latest_splits` can reclassify a **run** after the title pass. Strength and cross types are left alone ([`_reclassify`](../core/src/coach/splits.py#L257-L280)). The same reference max is passed through, so attaching splits does not put the activity’s own peak back in the denominator.
+`sensor.strava_latest_splits` can reclassify a **run** after the title pass. Strength and cross types are left alone ([`_reclassify`](../core/src/coach/splits.py#L259-L282)). The same reference max is passed through, so attaching splits does not put the activity’s own peak back in the denominator. Kilometre splits and laps from that match are stored on the session (`splits_json`, `laps_json`) so a later reclassify still sees them.
 
 [`classify_from_splits`](../core/src/coach/splits.py#L112-L158):
 
@@ -105,7 +105,7 @@ Order:
 - Three or more steady kilometres ≥ 0.35 min/km faster than the first split, with a standard deviation ≤ 0.20 → `tempo`.
 - A wide spread through the middle of the run (standard deviation ≥ 0.40 and range ≥ 0.8 min/km) → `intervals`.
 
-Splits attach by Strava activity id. A title match is used only when the session has no id and exactly one split set fits, so a repeated title such as “Afternoon Run” does not steal the previous run’s id ([`_match_split`](../core/src/coach/splits.py#L230-L254)).
+Splits attach by Strava activity id. A title match is used only when the session has no id and exactly one split set fits, so a repeated title such as “Afternoon Run” does not steal the previous run’s id ([`_match_split`](../core/src/coach/splits.py#L232-L256)).
 
 ## Garmin and Strava copies of one outing
 

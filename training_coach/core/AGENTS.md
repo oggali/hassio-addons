@@ -11,7 +11,7 @@ The add-on still has its own copy of these modules. This package is the one the 
 | `engine.py` | `plan_from_payload`, `evening_from_payload`. The only entry points. |
 | `inputs.py` | Dict payloads in and out: prefs, locks, sessions, recovery signals, day activity. |
 | `classify.py` | Session types. Strava and Garmin rows become `Session`. Same-outing merge. |
-| `splits.py` | Kilometre splits and laps reclassify a matched run. |
+| `splits.py` | Kilometre splits and laps reclassify a matched run. The match copies laps onto the session. |
 | `features.py` | Recovery band, fused day activity, `FeatureSnapshot`. Home Assistant entity collection lives in this file. |
 | `entities.py` | Home Assistant sensor ids. The API does not call it. Kept so the add-on can switch to this package. |
 | `load.py` | Session load, CTL / ATL / TSB, running volume, long-run floor. |

@@ -107,6 +107,30 @@ class SplitClassifyTests(unittest.TestCase):
         )
         self.assertEqual(updated[0].session_type, EASY_RUN)
 
+    def test_apply_splits_keeps_laps(self):
+        session = Session(
+            EASY_RUN,
+            "Track",
+            "Run",
+            SATURDAY.date(),
+            duration_min=40,
+            activity_id="9",
+            distance_m=8000,
+        )
+        laps = [{"distance_m": 400, "pace_min_km": 4.0, "name": "interval"}]
+        split_set = SplitSet(
+            activity_id="9",
+            activity_name="Track",
+            activity_type="Run",
+            distance_m=8000,
+            moving_time_s=2400,
+            splits=km_splits(5.0, 4.2, 5.1, 4.1),
+            laps=laps,
+        )
+        updated = apply_splits_to_sessions([session], {"9": split_set}, 75)
+        self.assertEqual(updated[0].laps, laps)
+        self.assertIsNot(updated[0].laps, laps)
+
     def test_stored_interval_splits_survive_reference_reclassify(self):
         session = Session(
             TEMPO,
