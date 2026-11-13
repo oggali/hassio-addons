@@ -43,6 +43,7 @@ class StoreTests(unittest.TestCase):
                 distance_m=8000,
                 activity_id="111",
                 splits=[{"distance_m": 1000, "pace_min_km": 4.0}],
+                laps=[{"distance_m": 400, "pace_min_km": 3.8, "name": "interval"}],
                 source="strava",
                 started_at=started,
                 relative_effort=68.0,
@@ -63,6 +64,8 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(by_title["Track intervals"].session_type, INTERVALS)
         self.assertEqual(by_title["Track intervals"].activity_id, "111")
         self.assertEqual(by_title["Track intervals"].splits[0]["pace_min_km"], 4.0)
+        self.assertEqual(by_title["Track intervals"].laps[0]["distance_m"], 400)
+        self.assertIsNone(by_title["Gym"].laps)
         self.assertEqual(by_title["Track intervals"].started_at, started)
         self.assertEqual(by_title["Track intervals"].relative_effort, 68.0)
         self.assertAlmostEqual(by_title["Track intervals"].session_load, 45 * 0.95)
@@ -250,7 +253,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(titles, ["Easy", "Later"])
 
     def test_weekday_locks_round_trip(self) -> None:
-        self.assertEqual(self.store.get_meta("schema_version"), "8")
+        self.assertEqual(self.store.get_meta("schema_version"), "9")
         self.store.upsert_weekday_lock(0, INTERVALS, "stdin")
         self.store.upsert_weekday_lock(5, "long_run", "stdin")
         self.assertEqual(self.store.weekday_locks(), {0: INTERVALS, 5: "long_run"})
@@ -260,7 +263,20 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.weekday_locks(), {1: "tempo"})
         self.store.wipe()
         self.assertEqual(self.store.weekday_locks(), {})
-        self.assertEqual(self.store.get_meta("schema_version"), "8")
+        self.assertEqual(self.store.get_meta("schema_version"), "9")
+
+    def test_migrate_adds_laps_column(self) -> None:
+        self.store.close()
+        conn = duckdb.connect(self.db_path)
+        conn.execute("ALTER TABLE sessions DROP COLUMN laps_json")
+        conn.close()
+        self.store = CoachStore(self.db_path)
+        cols = {
+            row[1]
+            for row in self.store._conn.execute("PRAGMA table_info('sessions')").fetchall()
+        }
+        self.assertIn("laps_json", cols)
+        self.assertEqual(self.store.get_meta("schema_version"), "9")
 
 
 if __name__ == "__main__":

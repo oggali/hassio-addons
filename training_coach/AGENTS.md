@@ -23,7 +23,7 @@ Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant 
 | `core/src/coach/parse.py` | Unavailable states, numbers, durations, datetimes. |
 | `core/src/coach/goal.py` | `Prefs`, race distances, target-time parse, phase (`base` / `build` / `peak` / `taper` / `race`). |
 | `core/src/coach/classify.py` | Session types and Strava/Garmin → `Session`. Same-outing merge. |
-| `core/src/coach/splits.py` | `sensor.strava_latest_splits` (km splits, laps, relative effort) reclassifies a matched run. |
+| `core/src/coach/splits.py` | `sensor.strava_latest_splits` (km splits, laps, relative effort) reclassifies a matched run and copies laps onto the session. |
 | `core/src/coach/features.py` | Recovery band, fused day activity, `FeatureSnapshot`. |
 | `core/src/coach/load.py` | Session load and Banister CTL / ATL / TSB. Running volume only. |
 | `core/src/coach/paces.py` | Easy pace from history, Riegel `k`, predicted finish. |
@@ -36,7 +36,7 @@ Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant 
 | `app/ha_client.py` | Supervisor REST (`SUPERVISOR_TOKEN` or `HA_TOKEN`, default `http://supervisor/core/api`). |
 | `app/ha_ws.py` | Short websocket for helper creation, plus the Android action listener. |
 | `app/prefs.py` | Create helpers if missing, poll them, append `prefs_history`. |
-| `app/store.py` | DuckDB schema, upserts, share copy, wipe. `SCHEMA_VERSION` is `"8"`. |
+| `app/store.py` | DuckDB schema, upserts, share copy, wipe. `SCHEMA_VERSION` is `"9"`. |
 | `app/persist.py` | Empty shim. Call `CoachStore`, not this module. |
 | `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. Logs `coach.__file__` at startup. |
 | `app/backup/` | Previous rule modules. Not imported. |
@@ -104,7 +104,7 @@ Session type constants live in `classify.py`. Use them; do not sprinkle new stri
 - Day activity (steps, calories, intensity) is fused from Oura Activity + Garmin totals. It explains the day. It does not mark the day trained.
 - Feelings, did-plan, skip reason, and effort fit are helpers and `feedback_history`. They are not add-on options.
 - DuckDB `TIMESTAMP` is UTC without tzinfo (`_utc_naive`). Live file is `/data/coach.duckdb` (locked, never auto-pruned). Share copy is `/share/training_coach/coach.duckdb`, written after morning notify, after `fetch_sessions`, and at 23:00. Other apps open the copy read-only.
-- Schema changes: add an idempotent `ALTER` in `CoachStore.migrate` and bump `SCHEMA_VERSION`. `weekday_locks` is created from `_SCHEMA_SQL` (`SCHEMA_VERSION` `"8"`). Backfill CTL/ATL when new load columns appear on a non-empty `sessions` table.
+- Schema changes: add an idempotent `ALTER` in `CoachStore.migrate` and bump `SCHEMA_VERSION`. `weekday_locks` is created from `_SCHEMA_SQL` (`SCHEMA_VERSION` `"9"`). Backfill CTL/ATL when new load columns appear on a non-empty `sessions` table. `sessions.laps_json` stores the Strava laps copied onto the session.
 
 Tune behavior in the module that owns the constant (`INTENSITY`, `CTL_TAU` / `ATL_TAU`, ladders, `PEAK_LONG_KM`, `HARD_SPACING_HOURS`, `TSB_OVERREACH`, Monte Carlo draw counts). Those are code constants, not add-on options. `simulate.py` uses stdlib `random` only.
 

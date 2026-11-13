@@ -183,6 +183,7 @@ def apply_splits_to_sessions(
         used_ids.add(matched.activity_id)
         session.activity_id = matched.activity_id
         session.splits = matched.splits
+        session.laps = list(matched.laps) if matched.laps else None
         if matched.relative_effort is not None:
             session.relative_effort = matched.relative_effort
         hint = classify_from_splits(matched)
@@ -221,6 +222,7 @@ def apply_splits_to_sessions(
                 source="strava_splits",
                 activity_id=split_set.activity_id,
                 splits=split_set.splits,
+                laps=list(split_set.laps) if split_set.laps else None,
                 relative_effort=split_set.relative_effort,
             )
         )
