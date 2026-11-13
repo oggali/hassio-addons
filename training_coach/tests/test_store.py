@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from datetime import date
@@ -10,14 +9,13 @@ from pathlib import Path
 
 import duckdb
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+import _path  # noqa: F401
 
-from classify import EASY_RUN, INTERVALS, STRENGTH, Session  # noqa: E402
-from features import Recovery  # noqa: E402
-from planner import Plan  # noqa: E402
-from recipes import Recipe  # noqa: E402
-from settings import Settings  # noqa: E402
+from coach.classify import EASY_RUN, INTERVALS, STRENGTH, Session  # noqa: E402
+from coach.features import Recovery  # noqa: E402
+from coach.planner import Plan  # noqa: E402
+from coach.recipes import Recipe  # noqa: E402
+from coach.settings import Settings  # noqa: E402
 from store import CoachStore, session_key  # noqa: E402
 
 
@@ -108,7 +106,7 @@ class StoreTests(unittest.TestCase):
         """Same-day sessions each move CTL; later one starts from earlier one's after."""
         from datetime import datetime, timezone
 
-        from load import CTL_TAU, annotate_session_banister, session_load
+        from coach.load import CTL_TAU, annotate_session_banister, session_load
 
         morning = Session(
             INTERVALS,
@@ -135,7 +133,7 @@ class StoreTests(unittest.TestCase):
         self.assertIsNotNone(evening.atl_after)
         self.assertIsNotNone(evening.tsb_after)
     def test_upsert_load_daily(self) -> None:
-        from load import LoadSnapshot
+        from coach.load import LoadSnapshot
 
         day = date(2026, 9, 12)
         snap = LoadSnapshot(

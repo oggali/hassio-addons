@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest import mock
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,6 +16,8 @@ from addon_ci import (  # noqa: E402
     closed_without_merge,
     merged_release_env,
     parse_top_field,
+    repo_root,
+    run_addon_tests,
 )
 
 
@@ -90,6 +93,33 @@ class MergedReleaseEnvTests(unittest.TestCase):
         payload = {"state": "CLOSED", "mergedAt": None, "mergeCommit": None}
         self.assertIsNone(merged_release_env(payload))
         self.assertTrue(closed_without_merge(payload))
+
+
+class RequirementsInstallTests(unittest.TestCase):
+    def test_relative_core_path_is_installed_from_the_app_directory(self) -> None:
+        addon = Addon(
+            dirname="training_coach",
+            name="Training Coach",
+            slug="training_coach",
+            version="2026.11.13.1",
+            config_rel="training_coach/config.yaml",
+        )
+        calls: list[tuple[list[str], Path | None]] = []
+
+        def fake_run(cmd, check=False, cwd=None, **_kwargs):
+            calls.append((list(cmd), None if cwd is None else Path(cwd)))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("addon_ci.subprocess.run", side_effect=fake_run):
+            run_addon_tests(addon)
+
+        installs = [call for call in calls if "install" in call[0] and "-r" in call[0]]
+        self.assertEqual(len(installs), 1)
+        requirements = Path(installs[0][0][-1])
+        self.assertEqual(installs[0][1], requirements.parent)
+        self.assertTrue((requirements.parent / ".." / "core" / "pyproject.toml").resolve().is_file())
+        discovers = [call for call in calls if "unittest" in call[0]]
+        self.assertEqual(discovers[0][1], repo_root())
 
 
 class DiscoverAddonsTests(unittest.TestCase):

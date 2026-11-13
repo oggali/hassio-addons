@@ -260,7 +260,13 @@ def run_addon_tests(addon: Addon) -> None:
     python = venv / "bin" / "python"
     subprocess.run([str(pip), "install", "--upgrade", "pip"], check=True)
     if requirements.is_file():
-        subprocess.run([str(pip), "install", "-r", str(requirements)], check=True)
+        # pip resolves a relative path from the process cwd. ../core in
+        # app/requirements.txt is the vendored package next to app/.
+        subprocess.run(
+            [str(pip), "install", "-r", str(requirements)],
+            cwd=requirements.parent,
+            check=True,
+        )
     print(f"Running tests for {addon.dirname}")
     subprocess.run(
         [str(python), "-m", "unittest", "discover", "-s", str(tests), "-v"],

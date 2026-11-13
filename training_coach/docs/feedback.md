@@ -4,7 +4,7 @@
 
 Evening compares the morning plan with every training session logged today, stores a row, and sends Telegram. It does not pick tomorrow’s session. Recovery is not known yet. The categories below are the ones later planning actually reads.
 
-Code: [`feedback.py`](../app/feedback.py), option lists in [`goal.py`](../app/goal.py#L24-L27), storage in [`feedback_history`](../app/store.py#L154-L166). The evening call is [`run_evening`](../app/main.py#L756-L842).
+Code: [`feedback.py`](../core/src/coach/feedback.py), option lists in [`goal.py`](../core/src/coach/goal.py#L24-L27), storage in [`feedback_history`](../app/store.py#L154-L166). The evening call is [`run_evening`](../app/main.py#L762-L848).
 
 ## Two different answers
 
@@ -18,18 +18,18 @@ Code: [`feedback.py`](../app/feedback.py), option lists in [`goal.py`](../app/go
 
 Evening writes `compliance` from the log. A button or a `checkin` can replace that value afterwards:
 
-- Android **Did it** stores `match`. **Changed** stores `substituted`. **Skipped** stores `skipped` ([`handle_mobile_action`](../app/main.py#L927-L934)).
-- Stdin `did_plan` `skipped` stores `skipped`, and `modified` stores `substituted`. `yes` leaves the evening compliance in place ([`apply_checkin`](../app/main.py#L844-L858)).
+- Android **Did it** stores `match`. **Changed** stores `substituted`. **Skipped** stores `skipped` ([`handle_mobile_action`](../app/main.py#L933-L940)).
+- Stdin `did_plan` `skipped` stores `skipped`, and `modified` stores `substituted`. `yes` leaves the evening compliance in place ([`apply_checkin`](../app/main.py#L850-L864)).
 
 Feeling, skip reason, and effort fit do not change `compliance`. The ladder and the Monte Carlo search read the stored compliance, so a tap is what they see later.
 
-Setting the helpers by hand is copied into today’s row on the helper poll ([`capture_feedback_helpers`](../app/main.py#L654-L682)). `did_plan` `skipped` and `modified` overwrite compliance the same way as the buttons. `yes` keeps the evening compliance, or stores `match` when that row had none.
+Setting the helpers by hand is copied into today’s row on the helper poll ([`capture_feedback_helpers`](../app/main.py#L660-L688)). `did_plan` `skipped` and `modified` overwrite compliance the same way as the buttons. `yes` keeps the evening compliance, or stores `match` when that row had none.
 
-A late run after evening can upgrade yesterday’s `skipped` row the next morning when a session has shown up ([`reconcile_yesterday`](../app/main.py#L634-L651)).
+A late run after evening can upgrade yesterday’s `skipped` row the next morning when a session has shown up ([`reconcile_yesterday`](../app/main.py#L640-L657)).
 
 ## Compliance
 
-[`classify_compliance`](../app/feedback.py#L113-L131), using every training session today, not only the hardest:
+[`classify_compliance`](../core/src/coach/feedback.py#L113-L131), using every training session today, not only the hardest:
 
 | Planned | Logged | Compliance |
 |---|---|---|
@@ -40,9 +40,9 @@ A late run after evening can upgrade yesterday’s `skipped` row the next mornin
 | `intervals` or `tempo` | the other quality type, not the planned one | `same_family` |
 | anything else that does not match | some other training | `substituted` |
 
-`match`, `same_family`, and `substituted` count as “did the session” ([`DID_SESSION_COMPLIANCE`](../app/feedback.py#L31-L33)). Those are the rows that ask for effort fit.
+`match`, `same_family`, and `substituted` count as “did the session” ([`DID_SESSION_COMPLIANCE`](../core/src/coach/feedback.py#L31-L33)). Those are the rows that ask for effort fit.
 
-Which session is named first: quality, then any non-rest type, then longer duration ([`logged_sessions`](../app/feedback.py#L78-L89)). Extra types that are not the planned one are listed in the coaching line ([`coaching_note`](../app/feedback.py#L198-L247)).
+Which session is named first: quality, then any non-rest type, then longer duration ([`logged_sessions`](../core/src/coach/feedback.py#L78-L89)). Extra types that are not the planned one are listed in the coaching line ([`coaching_note`](../core/src/coach/feedback.py#L198-L247)).
 
 Copy, in short:
 
@@ -54,27 +54,27 @@ Copy, in short:
 - `substituted` — the week still counts; next hard day waits 48h.
 - `extra` — extra work on a rest day; go easier if the legs feel it.
 
-If today already has a hard-or-long session and tomorrow’s calendar row is also hard-or-long, the evening line says morning will switch it. It does not choose easy vs rest ([`describe_evening_tomorrow`](../app/feedback.py#L154-L177)). Hard-or-long is defined in [Session categories](sessions.md).
+If today already has a hard-or-long session and tomorrow’s calendar row is also hard-or-long, the evening line says morning will switch it. It does not choose easy vs rest ([`describe_evening_tomorrow`](../core/src/coach/feedback.py#L154-L177)). Hard-or-long is defined in [Session categories](sessions.md).
 
 ## Buttons vs helpers
 
 Android allows three actions. The phone therefore does not show every helper option.
 
-First cards, from [`android_actions`](../app/feedback.py#L443-L467):
+First cards, from [`android_actions`](../core/src/coach/feedback.py#L443-L467):
 
 - Compliance is not `match`: **Did it** / **Skipped** / **Changed** → `did_plan` `yes` / `skipped` / `modified`.
 - Always: **Great** / **OK** / **Tired**. `wiped` exists on the helper and is not a button.
 
-Follow-ups, from [`android_followups`](../app/feedback.py#L402-L440):
+Follow-ups, from [`android_followups`](../core/src/coach/feedback.py#L402-L440):
 
 - **Skipped** opens **No time** / **Sore** / **Reply**. Reply is a text box stored as `other_sport` plus the text in `notes`. Helper-only skip reasons are `tired` and `weather`.
 - **Did it** or **Changed** opens **Too easy** / **Right** / **Too hard**.
 - A feeling tap does the same effort card when compliance is already in “did the session”.
 - Any other tap replaces the card with `Logged: …` and dismisses it after 8 seconds.
 
-Action names look like `coach_2026-10-24_feel_great`. [`parse_coach_action`](../app/feedback.py#L486-L525) maps them onto the helper entity and rejects unknown options.
+Action names look like `coach_2026-10-24_feel_great`. [`parse_coach_action`](../core/src/coach/feedback.py#L486-L525) maps them onto the helper entity and rejects unknown options.
 
-Telegram always gets the recap. It names the helpers only when Android is off ([`recap_text`](../app/feedback.py#L305-L353)). With Android on, Telegram does not ask you to type the answers. The recap, including today’s load and the 7-day sum, is in [Notifications](notifications.md).
+Telegram always gets the recap. It names the helpers only when Android is off ([`recap_text`](../core/src/coach/feedback.py#L305-L353)). With Android on, Telegram does not ask you to type the answers. The recap, including today’s load and the 7-day sum, is in [Notifications](notifications.md).
 
 Stdin `checkin` writes the same fields. Examples are in the [README](../README.md#live-prefs-helpers).
 

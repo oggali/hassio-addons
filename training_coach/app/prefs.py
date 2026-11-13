@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from entities import (
+from coach.entities import (
     DID_PLAN_HELPER,
     EFFORT_FIT_HELPER,
     FEELING_HELPER,
@@ -20,7 +20,7 @@ from entities import (
     WEEKLY_REST_HELPER,
     WEEKLY_STRENGTH_HELPER,
 )
-from goal import (
+from coach.goal import (
     DID_PLAN_OPTIONS,
     EFFORT_FIT_OPTIONS,
     FEELING_OPTIONS,
@@ -39,7 +39,7 @@ from goal import (
 )
 from ha_client import HomeAssistantClient
 from ha_ws import HaWebsocket
-from parse import is_unavailable, parse_float, state_value
+from coach.parse import is_unavailable, parse_float, state_value
 from store import CoachStore
 
 

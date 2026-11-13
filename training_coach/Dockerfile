@@ -9,8 +9,11 @@ RUN apt-get update \
         python3-wheel \
     && rm -rf /var/lib/apt/lists/*
 
+COPY core /core
 COPY app /app
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
+# pip resolves ../core in requirements.txt from this directory, which is /core.
+WORKDIR /app
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY run.sh /run.sh
 RUN chmod +x /run.sh

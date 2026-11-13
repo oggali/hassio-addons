@@ -12,10 +12,16 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_APP = Path(__file__).resolve().parent
+sys.path.insert(0, str(_APP))
+# Local tree: training_coach/core/src. Image: /app/main.py and /core/src.
+_CORE_SRC = _APP.parent / "core" / "src"
+if _CORE_SRC.is_dir():
+    sys.path.insert(0, str(_CORE_SRC))
 
-from classify import classify_logged_session, reference_max_hr
-from entities import (
+import coach
+from coach.classify import classify_logged_session, reference_max_hr
+from coach.entities import (
     FEEDBACK_SENSOR,
     GARMIN_LAST_ACTIVITIES,
     GARMIN_LAST_ACTIVITIES_FALLBACK,
@@ -26,8 +32,8 @@ from entities import (
     all_strava_slot_ids,
     tracked_entity_ids,
 )
-from features import build_snapshot, collect_live_sessions
-from feedback import (
+from coach.features import build_snapshot, collect_live_sessions
+from coach.feedback import (
     android_actions,
     android_followups,
     classify_compliance,
@@ -40,18 +46,18 @@ from feedback import (
     recap_text,
     resolve_tomorrow_row,
 )
-from goal import Prefs, days_to_race, format_hms, phase_for
+from coach.goal import Prefs, days_to_race, format_hms, phase_for
 from ha_client import HomeAssistantClient
 from ha_ws import parse_action_day, run_action_listener, websocket_url
-from load import build_load_snapshot
-from paces import build_paces, format_pace_range
-from parse import attr, first_entity, state_value
-from periodize import PlanDay, build_skeleton
-from planner import Plan, plan_day
+from coach.load import build_load_snapshot
+from coach.paces import build_paces, format_pace_range
+from coach.parse import attr, first_entity, state_value
+from coach.periodize import PlanDay, build_skeleton
+from coach.planner import Plan, plan_day
 from prefs import PrefsManager
-from recipes import format_km_range
-from settings import Settings
-from simulate import finish_distribution, search_calendar
+from coach.recipes import format_km_range
+from coach.settings import Settings
+from coach.simulate import finish_distribution, search_calendar
 from store import CoachStore
 
 
@@ -956,6 +962,7 @@ def handle_mobile_action(
 
 def main() -> None:
     settings = Settings.from_env()
+    log(f"coach rules {coach.__file__}")
     log(
         f"timezone={settings.timezone} run_time={settings.run_time} "
         f"evening={settings.evening_time} db={settings.db_path} "

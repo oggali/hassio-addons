@@ -2,36 +2,45 @@
 
 Home Assistant add-on that reads Oura, Garmin, and Strava sensors already in HA, then publishes today's session, a race-goal prediction, and Telegram. Optional Android notifications can repeat the evening message and collect button replies. Physiology and periodization only; not medical advice. The operator summary is `README.md`. The rule pages it links to are under `docs/`. Update the README when helpers, sensors, stdin commands, or the summary change. Update the matching `docs/` page when the rule itself changes.
 
-`app/` is a flat script directory, not a package. There is no `__init__.py`. `main.py` and every test insert `app/` on `sys.path` and import modules by filename (`from planner import plan_day`). Keep new modules the same way.
+Decision rules are the `coach` package in `core/`. `app/` is the Home Assistant shell: loop, helpers, DuckDB, and the websocket. The shell has no `__init__.py`. `main.py` inserts `app/` on `sys.path` and imports shell modules by filename (`from store import CoachStore`). Rule modules are `from coach.planner import plan_day` and the same for the rest of `coach`. Keep new shell modules flat. Shared rule changes belong in `training-coach/core`. This directory is a copy, not a live symlink: the image build cannot see the other checkout.
+
+`training_coach/scripts/sync_core.py` copies `../training-coach/core` (or `COACH_CORE_SRC`, or `/home/oskari/git/training-coach/core`) over `core/`. `training_coach/scripts/pre-commit` runs that copy when a commit already includes `training_coach/`, then stages `core/`. A commit that does not touch this add-on does not refresh it. Install the hook with `cp training_coach/scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`. If the copy changes `core/` and `config.yaml` `version` is not staged, the hook stops the commit. The commit recorded in `core/UPSTREAM` is the source checkout's `HEAD`. One add-on-only edit is written back after every copy: `Settings.notify_service` keeps this install's Telegram entity. Garmin recovery units, including a sensor unit of `hours`, come from that checkout and are not patched again here.
+
+`app/backup/` is the previous copy of the rule modules. Nothing in the running process imports it.
 
 ## Layout
 
 | Path | Role |
 |---|---|
 | `config.yaml` | Add-on manifest. Ops options only (timezone, clocks, notify services, Strava prefix, long-run minutes, max heart rate). Race goal and weekly caps are not options: changing options restarts the container. |
-| `build.yaml`, `Dockerfile` | `ghcr.io/hassio-addons/debian-base`, Python 3, `pip install app/requirements.txt` (`requests`, `duckdb`, `websocket-client`). |
+| `build.yaml`, `Dockerfile` | `ghcr.io/hassio-addons/debian-base`, Python 3. The image copies `core/` to `/core`, sets the working directory to `/app`, and runs `pip install -r requirements.txt`. That file installs `requests`, `duckdb`, `websocket-client`, and `../core`. pip resolves that relative path from the working directory. |
 | `run.sh` | `bashio` config → environment variables → `python3 /app/main.py`. |
-| `app/settings.py` | `Settings.from_env()`. Ops knobs only. |
-| `app/entities.py` | HA entity ids: Oura, Garmin, Strava slots, coach sensors, input helpers. |
-| `app/parse.py` | Unavailable states, numbers, durations, datetimes. |
+| `core/` | Copy of `training-coach/core`, refreshed by `scripts/sync_core.py`. Installed package name `coach`. |
+| `scripts/sync_core.py` | Copy that checkout, then reapply this install's Telegram notify entity. |
+| `scripts/pre-commit` | Git hook: refresh `core/` when the commit touches this add-on. |
+| `core/src/coach/settings.py` | `Settings.from_env()`. Ops knobs only. |
+| `core/src/coach/entities.py` | HA entity ids: Oura, Garmin, Strava slots, coach sensors, input helpers. |
+| `core/src/coach/parse.py` | Unavailable states, numbers, durations, datetimes. |
+| `core/src/coach/goal.py` | `Prefs`, race distances, target-time parse, phase (`base` / `build` / `peak` / `taper` / `race`). |
+| `core/src/coach/classify.py` | Session types and Strava/Garmin → `Session`. Same-outing merge. |
+| `core/src/coach/splits.py` | `sensor.strava_latest_splits` (km splits, laps, relative effort) reclassifies a matched run. |
+| `core/src/coach/features.py` | Recovery band, fused day activity, `FeatureSnapshot`. |
+| `core/src/coach/load.py` | Session load and Banister CTL / ATL / TSB. Running volume only. |
+| `core/src/coach/paces.py` | Easy pace from history, Riegel `k`, predicted finish. |
+| `core/src/coach/periodize.py` | Remaining-day skeleton, interval/tempo ladders, km and pace ranges. |
+| `core/src/coach/simulate.py` | Finish-time Monte Carlo (P10/P50/P90) and a small search over remaining days. |
+| `core/src/coach/planner.py` | Today's session. Recovery overrides the calendar. |
+| `core/src/coach/recipes.py` | Human title, km range, pace, interval structure. |
+| `core/src/coach/feedback.py` | Evening recap, compliance, Android action packs (max three buttons). |
+| `core/src/coach/engine.py` | `plan_from_payload` and `evening_from_payload`. The shell calls the same functions the modules export; it does not go through these entry points. |
 | `app/ha_client.py` | Supervisor REST (`SUPERVISOR_TOKEN` or `HA_TOKEN`, default `http://supervisor/core/api`). |
 | `app/ha_ws.py` | Short websocket for helper creation, plus the Android action listener. |
 | `app/prefs.py` | Create helpers if missing, poll them, append `prefs_history`. |
-| `app/goal.py` | `Prefs`, race distances, target-time parse, phase (`base` / `build` / `peak` / `taper` / `race`). |
-| `app/classify.py` | Session types and Strava/Garmin → `Session`. Same-outing merge. |
-| `app/splits.py` | `sensor.strava_latest_splits` (km splits, laps, relative effort) reclassifies a matched run. |
-| `app/features.py` | Recovery band, fused day activity, `FeatureSnapshot`. |
-| `app/load.py` | Session load and Banister CTL / ATL / TSB. Running volume only. |
-| `app/paces.py` | Easy pace from history, Riegel `k`, predicted finish. |
-| `app/periodize.py` | Remaining-day skeleton, interval/tempo ladders, km and pace ranges. |
-| `app/simulate.py` | Finish-time Monte Carlo (P10/P50/P90) and a small search over remaining days. |
-| `app/planner.py` | Today's session. Recovery overrides the calendar. |
-| `app/recipes.py` | Human title, km range, pace, interval structure. |
-| `app/feedback.py` | Evening recap, compliance, Android action packs (max three buttons). |
 | `app/store.py` | DuckDB schema, upserts, share copy, wipe. `SCHEMA_VERSION` is `"8"`. |
 | `app/persist.py` | Empty shim. Call `CoachStore`, not this module. |
-| `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. |
-| `tests/` | `unittest`. No Home Assistant. Fixture states in `test_planner.py`. |
+| `app/main.py` | Process loop: stdin, morning, evening, share export, helper poll. Logs `coach.__file__` at startup. |
+| `app/backup/` | Previous rule modules. Not imported. |
+| `tests/` | `unittest`. No Home Assistant. Fixture states in `test_planner.py`. `tests/_path.py` puts `core/src` and `app/` on `sys.path`. |
 | `docs/` | Rule pages linked from `README.md`. Update the page that owns a rule in the same change. |
 
 ## Docs
@@ -89,7 +98,7 @@ Session type constants live in `classify.py`. Use them; do not sprinkle new stri
 - Recovery wins over the calendar, over weekday locks, and over weekly quotas. `poor` or Oura rest mode → rest. `ok` uses the low end of the km range and downgrades quality/long. Gates are in `pick_session_type` and `overlay_calendar`; change both if the rule is shared.
 - Weekday locks live in DuckDB `weekday_locks` and the helpers `input_select.training_coach_lock_mon` … `_sun`. They are placed before the week template and count toward the weekly caps, including a missed day in the last 7 days. Empty locks leave the quota picker and the race skeleton unchanged. No race: only a locked today uses `overlay_calendar`. A locked hard day accepts two nights since the previous hard day (Saturday long keeps Monday intervals). It becomes easy when yesterday was hard or long. Unlocked days keep `HARD_SPACING_HOURS` (48). Race day replaces a lock on that date. Search does not drop, shrink, or swap a `source="lock"` row.
 - Garmin recovery votes (sleep, readiness, body battery, HRV, recovery time) count only after `garmin_is_awake`: morning training readiness changed today to a real score, or the sleep score changed today. A `calendarDate` on the morning sensor must be today when present. Body battery and a state of `unknown` are not a wake. Until then yesterday's preserved sleep score cannot force rest.
-- Garmin recovery time follows the sensor's `unit_of_measurement` (`garmin_recovery_hours`): `h` is hours, `min` is divided by 60. The "above 48 means minutes" guess is only for a sensor with no unit. Garmin Connect 3.0.6+ reports hours, and dividing 72 h by 60 turns a poor vote into a good one.
+- Garmin recovery time follows the sensor's `unit_of_measurement` (`garmin_recovery_hours` in `core/src/coach/features.py`): hour names (`h`, `hr`, `hour`, `hours`) stay hours, minute names are divided by 60. The "above 48 means minutes" guess is only for a sensor with no unit. Garmin Connect 3.0.6+ reports hours, and dividing 72 h by 60 turns a poor vote into a good one.
 - No race (`distance` `none` or no date): quota picker only. Race set: periodized skeleton through race day, then Monte Carlo. Book plans are not copied.
 - Long-run kilometres are floored at 2.2× weekday easy or ~90 minutes at easy pace (`load.long_run_floor_km`, `periodize._long_center`). Do not size longs from the median of barely-long sessions.
 - Day activity (steps, calories, intensity) is fused from Oura Activity + Garmin totals. It explains the day. It does not mark the day trained.

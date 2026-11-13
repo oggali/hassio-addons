@@ -7,7 +7,7 @@ import threading
 from datetime import date, datetime
 from typing import Any, Callable
 
-from settings import Settings
+from coach.settings import Settings
 
 try:
     import websocket

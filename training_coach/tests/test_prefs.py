@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+import _path  # noqa: F401
 
-from entities import FEEDBACK_HELPER_IDS, LOCK_HELPER_IDS, PREF_HELPER_IDS  # noqa: E402
-from goal import (  # noqa: E402
+from coach.entities import FEEDBACK_HELPER_IDS, LOCK_HELPER_IDS, PREF_HELPER_IDS  # noqa: E402
+from coach.goal import (  # noqa: E402
     Prefs,
     format_hms,
     normalize_race_distance,
     parse_target_seconds,
     phase_for,
 )
-from classify import INTERVALS  # noqa: E402
+from coach.classify import INTERVALS  # noqa: E402
 from prefs import HELPER_CREATE_SPECS, PrefsManager, locks_from_states, prefs_from_states  # noqa: E402
 from store import CoachStore  # noqa: E402
 

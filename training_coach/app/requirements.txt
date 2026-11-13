@@ -1,3 +1,5 @@
 requests
 duckdb
 websocket-client
+# Relative to this file's directory: training_coach/core here, /core in the image.
+../core
