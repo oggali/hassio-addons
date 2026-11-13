@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from coach.classify import EASY_RUN, INTERVALS, LONG_RUN, QUALITY, RUN_TYPES, Session
+from coach.classify import EASY_RUN, INTERVALS, LONG_RUN, QUALITY, RUN_TYPES, TEMPO, Session
 from coach.goal import (
     RACE_5K,
     RACE_10K,
@@ -24,6 +24,7 @@ from coach.goal import (
     Prefs,
     format_hms,
 )
+from coach.performance import blocked_easy_days, pace_nudge_min
 
 DEFAULT_RIEGEL_K = 1.06  # typical road exponent; 1.0 = even pace, 1.2 = big fade
 MIN_RIEGEL_K = 0.8
@@ -126,11 +127,18 @@ def _median(values: list[float], default: float) -> float:
     return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
-def easy_pace_min_km(sessions: list[Session], today: date) -> float:
+def easy_pace_min_km(
+    sessions: list[Session],
+    today: date,
+    skip_days: set[date] | None = None,
+) -> float:
     paces: list[float] = []
     cutoff = today - timedelta(days=180)
+    skipped = skip_days or set()
     for session in sessions:
         if session.session_type != EASY_RUN or not session.when or session.when < cutoff:
+            continue
+        if session.when in skipped:
             continue
         effort = _effort_pace(session)
         if not effort:
@@ -206,8 +214,13 @@ def best_reference(efforts: list[tuple[float, float, float]]) -> tuple[float, fl
     return km, seconds
 
 
-def build_paces(sessions: list[Session], prefs: Prefs, today: date) -> PaceSet:
-    easy = easy_pace_min_km(sessions, today)
+def build_paces(
+    sessions: list[Session],
+    prefs: Prefs,
+    today: date,
+    feedback: list[dict] | None = None,
+) -> PaceSet:
+    easy = easy_pace_min_km(sessions, today, blocked_easy_days(feedback))
     efforts = collect_efforts(sessions, today)
     k = fit_riegel_k(efforts)
     ref = best_reference(efforts)
@@ -249,6 +262,7 @@ def build_paces(sessions: list[Session], prefs: Prefs, today: date) -> PaceSet:
     goal_easy = easy
     if race_pace:
         goal_easy = max(easy, race_pace + EASY_VS_RACE_MIN_KM)
+    goal_easy += pace_nudge_min(feedback, EASY_RUN)
     easy_min = goal_easy - (EASY_BAND_S_PER_KM / 60.0)
     easy_max = goal_easy + (EASY_BAND_S_PER_KM / 60.0)
 
@@ -283,6 +297,9 @@ def build_paces(sessions: list[Session], prefs: Prefs, today: date) -> PaceSet:
                     interval_center = max(floor, nudged)
                 else:
                     tempo_center = max(floor, nudged)
+
+    interval_center += pace_nudge_min(feedback, INTERVALS)
+    tempo_center += pace_nudge_min(feedback, TEMPO)
 
     return PaceSet(
         easy_min=max(3.5, easy_min),

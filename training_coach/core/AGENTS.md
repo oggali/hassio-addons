@@ -14,7 +14,9 @@ The add-on still has its own copy of these modules. This package is the one the 
 | `splits.py` | Kilometre splits and laps reclassify a matched run. The match copies laps onto the session. |
 | `features.py` | Recovery band, fused day activity, `FeatureSnapshot`. Home Assistant entity collection lives in this file. |
 | `entities.py` | Home Assistant sensor ids. The API does not call it. Kept so the add-on can switch to this package. |
-| `load.py` | Session load, CTL / ATL / TSB, running volume, long-run floor. |
+| `load.py` | Session load, CTL / ATL / TSB, running volume, long-run floor. Systemic impulse and `running_ctl`. |
+| `performance.py` | Pace at a heart rate, cardiac drift, the fatigue gain, the pace nudge, the readiness factor. |
+| `backtest.py` | Next-21-day score of the easy-pace forecast and the published interval. |
 | `paces.py` | Easy pace, Riegel `k`, predicted finish. |
 | `periodize.py` | Remaining-day skeleton, interval and tempo ladders, km and pace ranges. |
 | `simulate.py` | Finish-time Monte Carlo and the small search over remaining days. Stdlib `random` only. |
@@ -64,5 +66,6 @@ just test
 |---|---|
 | `tests/test_planner.py` | Classify, recovery, quotas, Strava/Garmin fixtures. |
 | `tests/test_race_plan.py` | Paces, periodize, Monte Carlo, calendar overlay. |
+| `tests/test_model.py` | Impulse, burn-in, pace-at-HR, check-in nudge, fatigue gain, backtest, readiness factor. |
 | `tests/test_splits.py` | Split classification. |
 | `tests/test_engine.py` | `plan_from_payload` and `evening_from_payload`. |

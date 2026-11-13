@@ -2,7 +2,8 @@
 
 Feeling / did-plan / skip-reason are primary. After Did it / Changed (or after
 feeling when compliance already shows the session was done), a follow-up asks
-effort_fit (too_easy / about_right / too_hard) for later prescription tuning.
+effort_fit (too_easy / about_right / too_hard). Repeated answers on a good
+morning nudge that type's pace center.
 """
 
 from __future__ import annotations

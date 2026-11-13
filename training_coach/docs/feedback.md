@@ -84,6 +84,8 @@ Evening stores `planned_type`, `actual_type` (comma-separated when there are sev
 
 Those values change the calendar, not the recovery band. The ladder uses **yesterday’s** feeling, and the compliance stored on the most recent quality day (a Did it / Changed / Skipped tap may already have replaced the automatic one). See [How a day is chosen](planning.md#quality-ladders).
 
+`effort_fit` on a completed day whose morning band was `good` moves that type's pace center, as [Paces](planning.md#paces) describes. `too_hard` or `wiped` on an easy run drops that run from the easy-pace median and from the pace-at-heart-rate series. The fatigue gain reads the same good-morning answers, and a `tired` or `sore` skip on a good morning. `no_time`, `weather`, and `other_sport` stay availability: they feed the skip chance and the weekday long-run penalty, and they do not move the gain.
+
 The search over the last 120 days of `feedback_history`:
 
 - For a planned type with at least two rows, the skip chance is the fraction whose compliance is `skipped`. Fewer than two rows uses **12%**.

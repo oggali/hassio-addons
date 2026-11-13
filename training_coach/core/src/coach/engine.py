@@ -6,10 +6,11 @@ recovery scores, and day activity.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from coach.backtest import backtest_report
 from coach.classify import merge_training_sessions
 from coach.features import FeatureSnapshot, already_trained_on
 from coach.feedback import (
@@ -46,6 +47,7 @@ from coach.inputs import (
 from coach.load import LoadSnapshot, build_load_snapshot
 from coach.messages import format_morning_message
 from coach.paces import PaceSet, build_paces, format_pace_range
+from coach.performance import fit_fatigue_gain, readiness_factor
 from coach.periodize import PlanDay, build_skeleton
 from coach.planner import Plan, ease_stacked_tomorrow, plan_day
 from coach.recipes import format_km_range
@@ -131,6 +133,7 @@ def plan_from_payload(
     prefs: dict | None = None,
     locks: dict | None = None,
     feedback: list[dict] | None = None,
+    readiness: list[dict] | None = None,
     max_heart_rate: int = 190,
     long_run_min_minutes: int = 75,
     now: datetime | None = None,
@@ -162,6 +165,7 @@ def plan_from_payload(
         lock_map,
         _normalize_feedback(feedback),
         settings,
+        _normalize_readiness(readiness),
     )
     result.sessions = [session_to_dict(session) for session in merged]
     for raw, published in zip(merged, result.sessions):
@@ -175,6 +179,7 @@ def plan_morning(
     locks: dict[int, str] | None = None,
     feedback: list[dict] | None = None,
     settings: Settings | None = None,
+    readiness: list[dict] | None = None,
 ) -> MorningResult:
     settings = settings or Settings()
     prefs = prefs or Prefs.defaults()
@@ -183,8 +188,15 @@ def plan_morning(
     yesterday = _feedback_on(feedback, snapshot.today - timedelta(days=1))
     feeling = yesterday.get("feeling")
     last_compliance = _last_quality_compliance(snapshot, feedback)
+    hr_max = float(settings.max_heart_rate)
     load = build_load_snapshot(snapshot.sessions, snapshot.today)
-    paces = build_paces(snapshot.sessions, prefs, snapshot.today)
+    gain = fit_fatigue_gain(snapshot.sessions, feedback, snapshot.today, hr_max)
+    gain *= readiness_factor(
+        snapshot.sessions, readiness, snapshot.today, hr_max, feedback
+    )
+    gain = min(1.8, max(0.6, gain))
+    load = replace(load, fatigue_gain=gain)
+    paces = build_paces(snapshot.sessions, prefs, snapshot.today, feedback)
     skeleton = build_skeleton(
         snapshot.today,
         prefs,
@@ -195,9 +207,19 @@ def plan_morning(
         last_compliance,
         locks,
     )
-    finish = finish_distribution(
-        paces, prefs, seed=int(prefs.fingerprint[:8], 16) % 100000
+    report = backtest_report(
+        snapshot.sessions, feedback, prefs, snapshot.today, hr_max
     )
+    finish = finish_distribution(
+        paces,
+        prefs,
+        seed=int(prefs.fingerprint[:8], 16) % 100000,
+        rel_var=report.get("rel_var"),
+    )
+    if finish.get("p50"):
+        finish["coverage"] = report.get("coverage")
+        finish["baseline_coverage"] = report.get("baseline_coverage")
+        finish["backtest"] = report
     calendar = search_calendar(skeleton, load, prefs, paces, feedback, finish)
     today_row = next((day for day in calendar if day.day == snapshot.today), None)
     if today_row is not None and not (prefs.has_race or today_row.source == "lock"):
@@ -357,6 +379,17 @@ def _activity_payload(recovery: dict | None, activity: dict | None) -> dict | No
     return picked or None
 
 
+def _normalize_readiness(rows: list[dict] | None) -> list[dict]:
+    out = []
+    for row in rows or []:
+        item = dict(row)
+        day = item.get("day")
+        if isinstance(day, str) and day:
+            item["day"] = date.fromisoformat(day[:10])
+        out.append(item)
+    return out
+
+
 def _normalize_feedback(rows: list[dict] | None) -> list[dict]:
     out = []
     for row in rows or []:
@@ -442,6 +475,8 @@ def _load_dict(load: LoadSnapshot) -> dict:
         "long_km": round(load.long_km, 1),
         "weekly_load": round(load.weekly_load, 1),
         "daily_load": round(load.daily_load, 1),
+        "running_ctl": round(load.running_ctl, 1),
+        "fatigue_gain": round(load.fatigue_gain, 3),
     }
 
 
