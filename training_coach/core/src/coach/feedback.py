@@ -1,0 +1,525 @@
+"""Evening check-in: planned vs actual, Android actions, helper copy.
+
+Feeling / did-plan / skip-reason are primary. After Did it / Changed (or after
+feeling when compliance already shows the session was done), a follow-up asks
+effort_fit (too_easy / about_right / too_hard) for later prescription tuning.
+"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+from coach.classify import HARD_OR_LONG, QUALITY, REST, Session, is_training_session, session_day
+from coach.entities import DID_PLAN_HELPER, EFFORT_FIT_HELPER, FEELING_HELPER, SKIP_REASON_HELPER
+from coach.features import DayActivity
+from coach.goal import (
+    DID_PLAN_OPTIONS,
+    EFFORT_FIT_OPTIONS,
+    FEELING_OPTIONS,
+    SKIP_REASON_OPTIONS,
+)
+from coach.paces import format_pace_range
+from coach.planner import TITLES
+from coach.recipes import format_km_range
+
+COMPLIANCE_MATCH = "match"
+COMPLIANCE_FAMILY = "same_family"
+COMPLIANCE_SUBSTITUTED = "substituted"
+COMPLIANCE_SKIPPED = "skipped"
+COMPLIANCE_EXTRA = "extra"
+
+# Compliance values that mean the athlete did (or mostly did) the session —
+# enough to ask whether the prescription was too easy / right / too hard.
+DID_SESSION_COMPLIANCE = {COMPLIANCE_MATCH, COMPLIANCE_FAMILY, COMPLIANCE_SUBSTITUTED}
+
+TAG_CHECKIN_COMP = "training_coach_checkin_comp"
+TAG_CHECKIN_FEEL = "training_coach_checkin_feel"
+TAG_CHECKIN_SKIP = "training_coach_checkin_skip"
+TAG_CHECKIN_EFFORT = "training_coach_checkin_effort"
+ACK_TIMEOUT_SECONDS = 8
+ACK_LABELS = {
+    ("comp", "yes"): "Did it",
+    ("comp", "skipped"): "Skipped",
+    ("comp", "modified"): "Changed",
+    ("feel", "great"): "Great",
+    ("feel", "ok"): "OK",
+    ("feel", "tired"): "Tired",
+    ("feel", "wiped"): "Wiped",
+    ("skip", "no_time"): "No time",
+    ("skip", "tired"): "Tired",
+    ("skip", "sore"): "Sore",
+    ("skip", "weather"): "Weather",
+    ("skip", "other_sport"): "Other",
+    ("effort", "too_easy"): "Too easy",
+    ("effort", "about_right"): "About right",
+    ("effort", "too_hard"): "Too hard",
+}
+
+
+def _session_rank_key(session: Session) -> tuple:
+    return (
+        0 if session.session_type in QUALITY else 1 if session.session_type != REST else 2,
+        -(session.duration_min or 0),
+    )
+
+
+def _session_dedupe_key(session: Session) -> tuple:
+    if session.activity_id:
+        return ("id", str(session.activity_id))
+    return (
+        "t",
+        session.title,
+        session.session_type,
+        round(session.duration_min or 0, 1),
+        round(session.distance_m or 0, 0),
+    )
+
+
+def logged_sessions(sessions: list[Session], day: date) -> list[Session]:
+    """Today's structured workouts, quality-first, one row per activity."""
+    today = [s for s in sessions if session_day(s) == day and is_training_session(s)]
+    uniq: list[Session] = []
+    seen: set[tuple] = set()
+    for session in today:
+        key = _session_dedupe_key(session)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(session)
+    return sorted(uniq, key=_session_rank_key)
+
+
+def primary_actual(sessions: list[Session], day: date) -> str | None:
+    today = logged_sessions(sessions, day)
+    return today[0].session_type if today else None
+
+
+def describe_logged_session(session: Session) -> str:
+    title = TITLES.get(session.session_type, str(session.session_type).replace("_", " ")).lower()
+    parts = [title]
+    if session.distance_m is not None and session.distance_m >= 500:
+        parts.append(f"{session.distance_m / 1000.0:.1f} km")
+    elif session.duration_min:
+        parts.append(f"{int(round(session.duration_min))} min")
+    return " ".join(parts)
+
+
+def format_logged_label(sessions: list[Session]) -> str:
+    if not sessions:
+        return "nothing logged"
+    return ", ".join(describe_logged_session(s) for s in sessions)
+
+
+def classify_compliance(
+    planned: str | None,
+    actual: str | None,
+    actuals: list[str] | None = None,
+) -> str:
+    planned = planned or REST
+    if actuals is None:
+        types = [actual] if actual else []
+    else:
+        types = [t for t in actuals if t]
+    if planned == REST:
+        return COMPLIANCE_MATCH if not types else COMPLIANCE_EXTRA
+    if not types:
+        return COMPLIANCE_SKIPPED
+    if planned in types:
+        return COMPLIANCE_MATCH
+    if planned in QUALITY and any(t in QUALITY for t in types):
+        return COMPLIANCE_FAMILY
+    return COMPLIANCE_SUBSTITUTED
+
+
+def describe_next_session(row: dict | None) -> str | None:
+    """Human label for a plan_days / upcoming row, e.g. 'gym / strength'."""
+    if not row:
+        return None
+    session_type = row.get("session") or row.get("session_type")
+    if not session_type:
+        return None
+    title = TITLES.get(session_type, str(session_type).replace("_", " ")).lower()
+    km = row.get("km") or format_km_range(row.get("km_min"), row.get("km_max"))
+    pace = row.get("pace")
+    if not pace:
+        pace = format_pace_range(row.get("pace_min"), row.get("pace_max"))
+    parts = [title]
+    if km:
+        parts.append(str(km))
+    if pace:
+        parts.append(f"@ {pace}")
+    return " ".join(parts)
+
+
+def describe_evening_tomorrow(
+    tomorrow_row: dict | None,
+    today_sessions: list[Session],
+) -> str | None:
+    """Calendar label, plus a 48h-hard caveat when tonight already did quality/long.
+
+    Evening cannot know tomorrow's recovery, so it does not pick easy vs rest —
+    only that another hard/long day is off the table.
+    """
+    calendar = describe_next_session(tomorrow_row)
+    if not calendar:
+        return None
+    tomorrow_type = (tomorrow_row or {}).get("session") or (tomorrow_row or {}).get("session_type")
+    today_hard = [s for s in today_sessions if s.session_type in HARD_OR_LONG]
+    if not today_hard or tomorrow_type not in HARD_OR_LONG:
+        return calendar
+    done = TITLES.get(
+        today_hard[0].session_type, str(today_hard[0].session_type).replace("_", " ")
+    ).lower()
+    planned = TITLES.get(tomorrow_type, str(tomorrow_type).replace("_", " ")).lower()
+    return (
+        f"not {planned} — too soon after today’s {done}. "
+        f"Calendar had {calendar}; morning will switch it"
+    )
+
+
+def resolve_tomorrow_row(
+    today: date,
+    *,
+    plan_row: dict | None = None,
+    upcoming: list[dict] | None = None,
+) -> dict | None:
+    if plan_row:
+        return plan_row
+    target = (today + timedelta(days=1)).isoformat()
+    for item in upcoming or []:
+        day = item.get("day")
+        if hasattr(day, "isoformat"):
+            day = day.isoformat()
+        if day == target:
+            return item
+    return None
+
+
+def coaching_note(
+    compliance: str,
+    planned: str | None,
+    actual: str | None,
+    tomorrow: str | None = None,
+    *,
+    extras: list[str] | None = None,
+    logged_count: int = 0,
+) -> str:
+    next_line = f" Tomorrow: {tomorrow}." if tomorrow else ""
+    extra_types = [t for t in (extras or []) if t and t != planned]
+    extra_bit = ""
+    if extra_types:
+        labels = ", ".join(
+            TITLES.get(t, str(t).replace("_", " ")).lower() for t in extra_types
+        )
+        extra_bit = f" Plus extra {labels}."
+    if compliance == COMPLIANCE_MATCH:
+        if tomorrow:
+            return f"Nice — that matches the morning plan.{extra_bit}{next_line}"
+        return f"Nice — that matches the morning plan.{extra_bit}".rstrip()
+    if compliance == COMPLIANCE_FAMILY:
+        if tomorrow:
+            return f"Quality work is in; intervals vs tempo is close enough.{extra_bit}{next_line}"
+        return (
+            "Quality work is in; intervals vs tempo is close enough. "
+            f"Keep the next hard session honest.{extra_bit}"
+        )
+    if compliance == COMPLIANCE_SKIPPED:
+        if planned in QUALITY:
+            return (
+                "Quality was skipped. Don’t cram it tomorrow; the next good-recovery day "
+                f"can pick it up.{next_line}"
+            )
+        if planned == "long_run":
+            if tomorrow:
+                return f"Long run is still the weekend priority.{next_line}"
+            return "Long run is still the weekend priority; midweek stays easy."
+        if tomorrow:
+            return f"Missed session noted. One skip is fine — don’t stack extra.{next_line}"
+        return "Missed session noted. One skip is fine — don’t stack extra tomorrow."
+    if compliance == COMPLIANCE_SUBSTITUTED:
+        return (
+            f"You did {actual or 'something else'} instead of {planned}. "
+            f"The week still counts; next hard day waits 48h.{next_line}"
+        )
+    noun = "sessions" if logged_count > 1 else "session"
+    if tomorrow:
+        return f"Extra {noun} on a rest day — go easier if legs feel it.{next_line}"
+    return f"Extra {noun} on a rest day — treat tomorrow as easier if legs feel it."
+
+
+def _format_load_number(value: float) -> str:
+    rounded = round(float(value), 1)
+    if rounded == int(rounded):
+        return str(int(rounded))
+    return f"{rounded:.1f}"
+
+
+def format_load_line(daily: float | None = None, weekly: float | None = None) -> str | None:
+    """Session-load sums for a notification. None omits that side; zero is shown.
+
+    ``weekly`` is the rolling 7 days through today, the same sum as ``load_daily.weekly_load``.
+    The notification labels that sum ``7-day``.
+    """
+    parts: list[str] = []
+    if daily is not None:
+        parts.append(f"today {_format_load_number(daily)}")
+    if weekly is not None:
+        parts.append(f"7-day {_format_load_number(weekly)}")
+    if not parts:
+        return None
+    return "Training load: " + ", ".join(parts) + "."
+
+
+def format_activity_line(activity: DayActivity | None) -> str | None:
+    if not activity:
+        return None
+    parts: list[str] = []
+    if activity.steps:
+        parts.append(f"{activity.steps / 1000.0:.1f}k steps")
+    elif activity.yesterday_steps:
+        parts.append(f"{activity.yesterday_steps / 1000.0:.1f}k steps yesterday")
+    if activity.active_kcal:
+        parts.append(f"{activity.active_kcal:.0f} kcal")
+    if activity.intensity_min:
+        parts.append(f"{activity.intensity_min:.0f} intensity min")
+    if not parts:
+        return None
+    sources: list[str] = []
+    if (
+        activity.garmin_steps is not None
+        or activity.garmin_active_kcal is not None
+        or activity.garmin_intensity_min is not None
+        or activity.garmin_yesterday_steps is not None
+    ):
+        sources.append("Garmin")
+    if (
+        activity.oura_steps is not None
+        or activity.oura_active_kcal is not None
+        or activity.oura_score is not None
+    ):
+        sources.append("Oura")
+    src = f" ({' + '.join(sources)})" if sources else ""
+    return f"Day activity: {', '.join(parts)}{src}."
+
+
+def recap_text(
+    planned_title: str,
+    planned_type: str | None,
+    actual: str | None,
+    compliance: str,
+    *,
+    ask_helpers: bool,
+    tomorrow: str | None = None,
+    logged_label: str | None = None,
+    extras: list[str] | None = None,
+    logged_count: int = 0,
+    activity: DayActivity | None = None,
+    daily_load: float | None = None,
+    weekly_load: float | None = None,
+) -> str:
+    actual_label = logged_label or (actual.replace("_", " ") if actual else "nothing logged")
+    planned_label = planned_type.replace("_", " ") if planned_type else "rest"
+    count = logged_count or (0 if actual_label == "nothing logged" else 1)
+    lines = [
+        f"This morning: {planned_title}",
+        f"Logged: {actual_label} (planned {planned_label} → {compliance}).",
+        coaching_note(
+            compliance,
+            planned_type,
+            actual,
+            tomorrow=tomorrow,
+            extras=extras,
+            logged_count=count,
+        ),
+    ]
+    load_line = format_load_line(daily=daily_load, weekly=weekly_load)
+    if load_line:
+        lines.append(load_line)
+    activity_line = format_activity_line(activity)
+    if activity_line:
+        lines.append(activity_line)
+    if ask_helpers:
+        lines.append(
+            "Please set how it felt in HA: "
+            f"{FEELING_HELPER}, {DID_PLAN_HELPER}"
+            + (f", {SKIP_REASON_HELPER}" if compliance != COMPLIANCE_MATCH else "")
+            + (
+                f", {EFFORT_FIT_HELPER}"
+                if compliance in DID_SESSION_COMPLIANCE
+                else ""
+            )
+            + "."
+        )
+    return "\n".join(lines)
+
+
+def checkin_tag(kind: str) -> str | None:
+    return {
+        "comp": TAG_CHECKIN_COMP,
+        "feel": TAG_CHECKIN_FEEL,
+        "skip": TAG_CHECKIN_SKIP,
+        "effort": TAG_CHECKIN_EFFORT,
+    }.get(kind)
+
+
+def action_ack_message(parsed: dict) -> str:
+    notes = str(parsed.get("notes") or "").strip()
+    if notes:
+        if len(notes) > 80:
+            notes = notes[:77] + "..."
+        return f"Logged: {notes}"
+    label = ACK_LABELS.get((parsed.get("kind"), parsed.get("option")))
+    return f"Logged: {label}" if label else "Logged"
+
+
+def effort_fit_actions(day: date) -> dict:
+    key = day.isoformat()
+    return {
+        "tag": TAG_CHECKIN_EFFORT,
+        "actions": [
+            {"action": f"coach_{key}_effort_too_easy", "title": "Too easy"},
+            {"action": f"coach_{key}_effort_about_right", "title": "Right"},
+            {"action": f"coach_{key}_effort_too_hard", "title": "Too hard"},
+        ],
+    }
+
+
+def _effort_followup(day: date, clear_tag: str) -> list[dict]:
+    pack = effort_fit_actions(day)
+    return [
+        {"message": "clear_notification", "android_data": {"tag": clear_tag}},
+        {
+            "message": "Was the session which you did too easy, about right, or too hard?",
+            "android_data": {
+                "tag": pack["tag"],
+                "actions": pack["actions"],
+                "sticky": True,
+            },
+        },
+    ]
+
+
+def android_followups(
+    parsed: dict,
+    day: date,
+    *,
+    compliance: str | None = None,
+) -> list[dict]:
+    """Companion payloads after a button tap (same tag replaces the sticky card)."""
+    tag = checkin_tag(str(parsed.get("kind") or ""))
+    if not tag:
+        return []
+    kind = parsed.get("kind")
+    option = parsed.get("option")
+    if kind == "comp" and option == "skipped":
+        pack = skip_reason_actions(day)
+        return [
+            {"message": "clear_notification", "android_data": {"tag": tag}},
+            {
+                "message": "Why did you skip?",
+                "android_data": {
+                    "tag": pack["tag"],
+                    "actions": pack["actions"],
+                    "sticky": True,
+                },
+            },
+        ]
+    if kind == "comp" and option in {"yes", "modified"}:
+        return _effort_followup(day, tag)
+    if kind == "feel" and compliance in DID_SESSION_COMPLIANCE:
+        return _effort_followup(day, tag)
+    return [
+        {
+            "message": action_ack_message(parsed),
+            "android_data": {
+                "tag": tag,
+                "timeout": ACK_TIMEOUT_SECONDS,
+                "sticky": False,
+            },
+        }
+    ]
+
+
+def android_actions(day: date, compliance: str) -> list[dict]:
+    key = day.isoformat()
+    notices: list[dict] = []
+    if compliance != COMPLIANCE_MATCH:
+        notices.append(
+            {
+                "tag": TAG_CHECKIN_COMP,
+                "actions": [
+                    {"action": f"coach_{key}_comp_did", "title": "Did it"},
+                    {"action": f"coach_{key}_comp_skipped", "title": "Skipped"},
+                    {"action": f"coach_{key}_comp_changed", "title": "Changed"},
+                ],
+            }
+        )
+    notices.append(
+        {
+            "tag": TAG_CHECKIN_FEEL,
+            "actions": [
+                {"action": f"coach_{key}_feel_great", "title": "Great"},
+                {"action": f"coach_{key}_feel_ok", "title": "OK"},
+                {"action": f"coach_{key}_feel_tired", "title": "Tired"},
+            ],
+        }
+    )
+    return notices
+
+
+def skip_reason_actions(day: date) -> dict:
+    key = day.isoformat()
+    return {
+        "tag": TAG_CHECKIN_SKIP,
+        "actions": [
+            {"action": f"coach_{key}_skip_notime", "title": "No time"},
+            {"action": f"coach_{key}_skip_sore", "title": "Sore"},
+            {
+                "action": f"coach_{key}_skip_other",
+                "title": "Reply",
+                "behavior": "textInput",
+            },
+        ],
+    }
+
+
+def parse_coach_action(action: str, reply_text: str | None = None) -> dict | None:
+    if not action or not action.startswith("coach_"):
+        return None
+    parts = action.split("_")
+    # coach_YYYY-MM-DD_feel_great  → ['coach', 'YYYY-MM-DD', 'feel', 'great']
+    if len(parts) < 4:
+        return None
+    day = parts[1]
+    kind = parts[2]
+    rest = "_".join(parts[3:])
+    out: dict = {"day": day, "kind": kind, "value": rest}
+    if kind == "comp":
+        mapping = {"did": "yes", "skipped": "skipped", "changed": "modified"}
+        out["helper"] = DID_PLAN_HELPER
+        out["option"] = mapping.get(rest)
+        out["field"] = "did_plan"
+    elif kind == "feel":
+        option = rest if rest in FEELING_OPTIONS else None
+        out["helper"] = FEELING_HELPER
+        out["option"] = option
+        out["field"] = "feeling"
+    elif kind == "skip":
+        mapping = {"notime": "no_time", "sore": "sore", "other": "other_sport"}
+        out["helper"] = SKIP_REASON_HELPER
+        out["option"] = mapping.get(rest)
+        out["field"] = "skip_reason"
+        if rest == "other" and reply_text:
+            out["notes"] = reply_text
+            out["option"] = "other_sport"
+    elif kind == "effort":
+        option = rest if rest in EFFORT_FIT_OPTIONS else None
+        out["helper"] = EFFORT_FIT_HELPER
+        out["option"] = option
+        out["field"] = "effort_fit"
+    else:
+        return None
+    allowed = DID_PLAN_OPTIONS + FEELING_OPTIONS + SKIP_REASON_OPTIONS + EFFORT_FIT_OPTIONS
+    if out.get("option") not in allowed:
+        return None
+    return out

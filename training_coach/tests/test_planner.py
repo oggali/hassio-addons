@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-ROOT = Path(__file__).resolve().parents[1] / "app"
-sys.path.insert(0, str(ROOT))
+import _path  # noqa: F401
 
-from classify import (  # noqa: E402
+from coach.classify import (  # noqa: E402
     CROSS_EASY,
     CROSS_EASY_LONG,
     CROSS_HARD,
@@ -32,7 +29,7 @@ from classify import (  # noqa: E402
     session_day,
     session_from_garmin_activity,
 )
-from entities import (  # noqa: E402
+from coach.entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
     GARMIN_HRV_NIGHT,
@@ -56,10 +53,10 @@ from entities import (  # noqa: E402
     OURA_TEMP,
     strava_slot_ids,
 )
-from features import build_snapshot, garmin_is_awake, garmin_recovery_hours  # noqa: E402
-from load import session_load  # noqa: E402
-from planner import plan_day  # noqa: E402
-from settings import Settings  # noqa: E402
+from coach.features import build_snapshot, garmin_is_awake, garmin_recovery_hours  # noqa: E402
+from coach.load import session_load  # noqa: E402
+from coach.planner import plan_day  # noqa: E402
+from coach.settings import Settings  # noqa: E402
 
 TZ = ZoneInfo("Europe/Helsinki")
 SATURDAY = datetime(2026, 8, 22, 7, 30, tzinfo=TZ)
@@ -765,7 +762,7 @@ class WeekdayLockTests(unittest.TestCase):
         self.assertNotIn(plan.session_type, {LONG_RUN, INTERVALS, TEMPO})
 
     def test_locked_today_is_intervals_without_a_race(self):
-        from periodize import PlanDay
+        from coach.periodize import PlanDay
 
         intended = PlanDay(
             day=SATURDAY.date(),
@@ -783,7 +780,7 @@ class WeekdayLockTests(unittest.TestCase):
         self.assertIn("Saturday is locked to intervals", plan.why)
 
     def test_poor_recovery_names_the_lock(self):
-        from periodize import PlanDay
+        from coach.periodize import PlanDay
 
         now = SATURDAY + timedelta(days=2)
         intended = PlanDay(
@@ -803,7 +800,7 @@ class WeekdayLockTests(unittest.TestCase):
         self.assertIn("recovery looks poor", plan.why.lower())
 
     def test_saturday_long_leaves_locked_monday_intervals(self):
-        from periodize import PlanDay
+        from coach.periodize import PlanDay
 
         now = SATURDAY + timedelta(days=2)
         states = good_recovery()
@@ -824,7 +821,7 @@ class WeekdayLockTests(unittest.TestCase):
         self.assertIn("Monday is locked to intervals", plan.why)
 
     def test_yesterday_long_turns_locked_monday_easy(self):
-        from periodize import PlanDay
+        from coach.periodize import PlanDay
 
         now = SATURDAY + timedelta(days=2)
         states = good_recovery()

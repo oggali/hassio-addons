@@ -2,7 +2,7 @@
 
 [Back to the add-on README](../README.md)
 
-Logged workouts become one of the types in [`classify.py`](../app/classify.py#L29-L60). The coach never prescribes bike or ski; those types exist so Strava and Garmin history still counts.
+Logged workouts become one of the types in [`classify.py`](../core/src/coach/classify.py#L29-L60). The coach never prescribes bike or ski; those types exist so Strava and Garmin history still counts.
 
 | Type | Group | What it does to the next plan |
 |---|---|---|
@@ -27,25 +27,25 @@ Sets used by the planner live next to the constants:
 
 ## What counts as already trained
 
-[`is_training_session`](../app/classify.py#L162-L174) ignores `rest` and `other`. A training type with no duration and no distance still counts. Otherwise it needs **10 minutes** or **1000 m**. A 5-minute shakeout under 1 km does not mark the day trained.
+[`is_training_session`](../core/src/coach/classify.py#L162-L174) ignores `rest` and `other`. A training type with no duration and no distance still counts. Otherwise it needs **10 minutes** or **1000 m**. A 5-minute shakeout under 1 km does not mark the day trained.
 
 Oura workouts are never read. Steps and calories from the ring are day activity, not a session. See [Training load](load.md).
 
 ## Which sport function runs
 
-[`classify_sport`](../app/classify.py#L432-L468), in order:
+[`classify_sport`](../core/src/coach/classify.py#L433-L469), in order:
 
 1. Strength sport, `"weight"` in the sport name, or `"gym"` in the title → `strength`.
-2. Run sport (`run`, `running`, `trailrun`, `virtualrun`), or an empty sport whose title looks like a run → [`classify_run`](../app/classify.py#L331-L379).
+2. Run sport (`run`, `running`, `trailrun`, `virtualrun`), or an empty sport whose title looks like a run → [`classify_run`](../core/src/coach/classify.py#L332-L380).
 3. Alpine ski, snowboard, snowshoe, walk, hike, yoga, pilates → `other`.
-4. Bike, nordic/skate ski, swim, row, or any other sport lasting at least 25 minutes with a heart rate → [`classify_cross`](../app/classify.py#L382-L429).
+4. Bike, nordic/skate ski, swim, row, or any other sport lasting at least 25 minutes with a heart rate → [`classify_cross`](../core/src/coach/classify.py#L383-L430).
 5. Anything else → `other`.
 
-Sport names are lowercased with spaces, hyphens, and underscores removed. Bike also matches `ride`, `bike`, `cycl`, and titles containing zwift, commute, or group ride ([`is_bike_sport`](../app/classify.py#L238-L243)). Ski matches the nordic names plus titles such as `hiihto`, skate, classic, rollerski ([`is_ski_sport`](../app/classify.py#L246-L254)). A sport key that is alpine is not ski.
+Sport names are lowercased with spaces, hyphens, and underscores removed. Bike also matches `ride`, `bike`, `cycl`, and titles containing zwift, commute, or group ride ([`is_bike_sport`](../core/src/coach/classify.py#L239-L244)). Ski matches the nordic names plus titles such as `hiihto`, skate, classic, rollerski ([`is_ski_sport`](../core/src/coach/classify.py#L247-L255)). A sport key that is alpine is not ski.
 
 ## Reference heart rate
 
-Run and cross heart-rate steps divide by one personal max, [`reference_max_hr`](../app/classify.py#L297-L328). The activity’s own peak is kept on the session row and is not the denominator.
+Run and cross heart-rate steps divide by one personal max, [`reference_max_hr`](../core/src/coach/classify.py#L298-L329). The activity’s own peak is kept on the session row and is not the denominator.
 
 `max_heart_rate` in the add-on options is the starting value (this install: **195**). Each ingest computes the working number from stored sessions:
 
@@ -56,13 +56,13 @@ Run and cross heart-rate steps divide by one personal max, [`reference_max_hr`](
 
 The log line is `Heart-rate reference N bpm (setup)`, `setup raised by a session max`, or `rolling 6 months`.
 
-On the same ingest, stored run and cross rows are classified again with that reference ([`classify_logged_session`](../app/classify.py#L488-L526)). Title words and stored kilometre splits still win, so an interval workout stays `intervals`. Session load and the CTL/ATL trace update when a type changes. The evening `feedback_history` row stays the text that was sent that night.
+On the same ingest, stored run and cross rows are classified again with that reference ([`classify_logged_session`](../core/src/coach/classify.py#L490-L528)). Title words and stored kilometre splits still win, so an interval workout stays `intervals`. Session load and the CTL/ATL trace update when a type changes. The evening `feedback_history` row stays the text that was sent that night.
 
 A steady 61-minute run averaging 148, with a peak of 159 on that outing, is `easy_run` when the reference is 195 (148 / 195 = 0.76).
 
 ## Runs
 
-[`classify_run`](../app/classify.py#L331-L379) stops at the first match:
+[`classify_run`](../core/src/coach/classify.py#L332-L380) stops at the first match:
 
 1. Title contains an interval word: interval, repeat, track, vo2, speed, fartlek, strides.
 2. Title contains a tempo word: tempo, threshold, cruise, lactate, steady-state.
@@ -75,7 +75,7 @@ A steady 61-minute run averaging 148, with a peak of 159 on that outing, is `eas
 
 ## Bike, ski, and other cross-training
 
-[`classify_cross`](../app/classify.py#L382-L429). “Long” for cross is not the run threshold. [`cross_long_minutes`](../app/classify.py#L257-L265):
+[`classify_cross`](../core/src/coach/classify.py#L383-L430). “Long” for cross is not the run threshold. [`cross_long_minutes`](../core/src/coach/classify.py#L258-L266):
 
 - Ski: `max(80, long_run_min_minutes × 1.1)` → **82** at the default 75.
 - Bike and everything else: `max(100, long_run_min_minutes × 1.4)` → **105** at the default 75.
@@ -96,20 +96,20 @@ Order:
 
 ## Splits
 
-`sensor.strava_latest_splits` can reclassify a **run** after the title pass. Strength and cross types are left alone ([`_reclassify`](../app/splits.py#L257-L280)). The same reference max is passed through, so attaching splits does not put the activity’s own peak back in the denominator.
+`sensor.strava_latest_splits` can reclassify a **run** after the title pass. Strength and cross types are left alone ([`_reclassify`](../core/src/coach/splits.py#L257-L280)). The same reference max is passed through, so attaching splits does not put the activity’s own peak back in the denominator.
 
-[`classify_from_splits`](../app/splits.py#L112-L158):
+[`classify_from_splits`](../core/src/coach/splits.py#L112-L158):
 
 - Five or more laps, five or more of them 200–1200 m, and at least three laps ≥ 0.35 min/km faster than the median pace → `intervals`. Lap names containing interval/repeat or tempo/threshold do the same.
 - On kilometre splits (pace between 2.5 and 12 min/km): two or more kilometres that are ≥ 0.35 min/km faster than both neighbours → `intervals`.
 - Three or more steady kilometres ≥ 0.35 min/km faster than the first split, with a standard deviation ≤ 0.20 → `tempo`.
 - A wide spread through the middle of the run (standard deviation ≥ 0.40 and range ≥ 0.8 min/km) → `intervals`.
 
-Splits attach by Strava activity id. A title match is used only when the session has no id and exactly one split set fits, so a repeated title such as “Afternoon Run” does not steal the previous run’s id ([`_match_split`](../app/splits.py#L230-L254)).
+Splits attach by Strava activity id. A title match is used only when the session has no id and exactly one split set fits, so a repeated title such as “Afternoon Run” does not steal the previous run’s id ([`_match_split`](../core/src/coach/splits.py#L230-L254)).
 
 ## Garmin and Strava copies of one outing
 
-[`sessions_look_same`](../app/classify.py#L690-L732) and [`merge_training_sessions`](../app/classify.py#L735-L753):
+[`sessions_look_same`](../core/src/coach/classify.py#L692-L734) and [`merge_training_sessions`](../core/src/coach/classify.py#L737-L755):
 
 - Same activity id → same outing.
 - Different sport families (run vs bike vs ski vs gym) stay separate.
@@ -117,8 +117,8 @@ Splits attach by Strava activity id. A title match is used only when the session
 - Date only, no clock: durations within **5 minutes** and distances within **25%**. That keeps two similar-length sessions on the same day apart.
 - When they merge, Strava is kept over Garmin, and Garmin over an older history stub.
 
-Strava distance sensors are treated as kilometres when the number is under 1000, and as metres otherwise ([`strava_distance_metres`](../app/classify.py#L190-L199)). Garmin distance is metres. Garmin duration is seconds.
+Strava distance sensors are treated as kilometres when the number is under 1000, and as metres otherwise ([`strava_distance_metres`](../core/src/coach/classify.py#L190-L199)). Garmin distance is metres. Garmin duration is seconds.
 
 Strava’s date sensor wins when it disagrees with the activity attribute. The log line is `DATE MISMATCH`.
 
-Entry points: [`session_from_strava_slot`](../app/classify.py#L534-L581), [`session_from_garmin_activity`](../app/classify.py#L599-L651). History is merged in [`collect_live_sessions`](../app/features.py#L543-L569). Garmin’s planned `last_workout` sensor is not read.
+Entry points: [`session_from_strava_slot`](../core/src/coach/classify.py#L536-L583), [`session_from_garmin_activity`](../core/src/coach/classify.py#L601-L653). History is merged in [`collect_live_sessions`](../core/src/coach/features.py#L543-L569). Garmin’s planned `last_workout` sensor is not read.

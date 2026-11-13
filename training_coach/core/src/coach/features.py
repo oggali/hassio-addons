@@ -1,0 +1,631 @@
+"""Build a feature snapshot from Home Assistant states."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from coach.classify import (
+    HARD_OR_LONG,
+    Session,
+    is_training_session,
+    merge_training_sessions,
+    session_day,
+    session_from_garmin_activity,
+    session_from_garmin_entity,
+    session_from_strava_slot,
+)
+from coach.entities import (
+    GARMIN_ACTIVE_CALORIES,
+    GARMIN_ACTIVE_CALORIES_FALLBACK,
+    GARMIN_BODY_BATTERY,
+    GARMIN_HRV_BASELINE,
+    GARMIN_HRV_NIGHT,
+    GARMIN_HRV_STATUS,
+    GARMIN_INTENSITY_MINUTES,
+    GARMIN_INTENSITY_MINUTES_FALLBACK,
+    GARMIN_LAST_ACTIVITIES,
+    GARMIN_LAST_ACTIVITIES_FALLBACK,
+    GARMIN_LAST_ACTIVITY,
+    GARMIN_LAST_ACTIVITY_FALLBACK,
+    GARMIN_MORNING_READINESS,
+    GARMIN_RECOVERY_TIME,
+    GARMIN_SLEEP_SCORE,
+    GARMIN_TOTAL_STEPS,
+    GARMIN_TOTAL_STEPS_FALLBACK,
+    GARMIN_TRAINING_READINESS,
+    GARMIN_YESTERDAY_STEPS,
+    OURA_ACTIVE_CALORIES,
+    OURA_ACTIVITY_SCORE,
+    OURA_HIGH_ACTIVITY_TIME,
+    OURA_HRV_BALANCE,
+    OURA_MEDIUM_ACTIVITY_TIME,
+    OURA_READINESS,
+    OURA_REST_MODE,
+    OURA_SLEEP,
+    OURA_SLEEP_HRV,
+    OURA_STEPS,
+    OURA_TEMP,
+    STRAVA_LATEST_SPLITS,
+    all_strava_slot_ids,
+)
+from coach.parse import (
+    attr,
+    first_entity,
+    is_unavailable,
+    last_changed,
+    last_updated,
+    parse_bool,
+    parse_date,
+    parse_float,
+    state_value,
+)
+from coach.settings import Settings
+from coach.splits import apply_splits_to_sessions, collect_split_sets
+
+
+@dataclass
+class Recovery:
+    band: str
+    rest_mode: bool
+    oura_readiness: float | None
+    oura_sleep: float | None
+    oura_hrv: float | None
+    oura_hrv_balance: float | None
+    oura_temp: float | None
+    garmin_readiness: float | None
+    garmin_readiness_text: str | None
+    garmin_body_battery: float | None
+    garmin_recovery_hours: float | None
+    garmin_hrv_status: str | None
+    garmin_hrv_ratio: float | None
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DayActivity:
+    """Fused daily movement (NEAT), not sport sessions.
+
+    Oura workouts are ignored. Steps/calories/intensity come from Oura Activity
+    plus Garmin daily totals so a rest-day walk still shows up as load.
+    """
+
+    oura_score: float | None = None
+    oura_steps: float | None = None
+    oura_active_kcal: float | None = None
+    oura_high_min: float | None = None
+    oura_medium_min: float | None = None
+    garmin_steps: float | None = None
+    garmin_yesterday_steps: float | None = None
+    garmin_active_kcal: float | None = None
+    garmin_intensity_min: float | None = None
+    steps: float | None = None
+    yesterday_steps: float | None = None
+    active_kcal: float | None = None
+    intensity_min: float | None = None
+
+    @property
+    def insight_steps(self) -> float | None:
+        """Yesterday's Garmin steps when present; otherwise today's fused steps."""
+        if self.yesterday_steps is not None:
+            return self.yesterday_steps
+        return self.steps
+
+    def as_dict(self) -> dict[str, float | None]:
+        return {
+            "oura_score": self.oura_score,
+            "oura_steps": self.oura_steps,
+            "oura_active_kcal": self.oura_active_kcal,
+            "garmin_steps": self.garmin_steps,
+            "garmin_yesterday_steps": self.garmin_yesterday_steps,
+            "garmin_active_kcal": self.garmin_active_kcal,
+            "garmin_intensity_min": self.garmin_intensity_min,
+            "steps": self.steps,
+            "yesterday_steps": self.yesterday_steps,
+            "active_kcal": self.active_kcal,
+            "intensity_min": self.intensity_min,
+            "insight_steps": self.insight_steps,
+        }
+
+
+@dataclass
+class FeatureSnapshot:
+    now: datetime
+    today: date
+    recovery: Recovery
+    sessions: list[Session]
+    oura_synced_today: bool
+    already_trained_today: bool
+    garmin_awake: bool = False
+    activity: DayActivity = field(default_factory=DayActivity)
+
+
+def _garmin_readiness_score(raw: Any) -> tuple[float | None, str | None]:
+    text = None if raw is None else str(raw).strip()
+    number = parse_float(raw)
+    mapping = {
+        "prime": 90.0,
+        "productive": 80.0,
+        "moderate": 65.0,
+        "poor": 45.0,
+        "unproductive": 40.0,
+        "detraining": 50.0,
+        "strained": 48.0,
+        "recovery": 42.0,
+    }
+    if number is not None and number <= 10:
+        # Some Garmin fields are 1-10 scores.
+        number = number * 10
+    if text:
+        mapped = mapping.get(text.lower())
+        if mapped is not None:
+            return mapped, text
+    return number, text
+
+
+def _changed_today(entity: dict[str, Any] | None, tz: ZoneInfo, today: date) -> bool:
+    changed = last_changed(entity, tz)
+    return bool(changed and changed.date() == today)
+
+
+def _calendar_date_attr(entity: dict[str, Any] | None, tz: ZoneInfo) -> date | None:
+    """Sleep/readiness day when the integration puts one on the sensor."""
+    if not entity:
+        return None
+    for key in ("calendarDate", "calendar_date", "timestampLocal", "timestamp"):
+        parsed = parse_date(attr(entity, key), tz)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _usable_readiness(states: dict[str, dict[str, Any]]) -> Any:
+    """First Garmin readiness state that is not unknown/unavailable.
+
+    Training readiness is often the string ``unknown`` before the morning
+    snapshot exists. That string is truthy, so it must not hide the morning sensor.
+    """
+    for key in (GARMIN_TRAINING_READINESS, GARMIN_MORNING_READINESS):
+        raw = state_value(states.get(key))
+        if not is_unavailable(raw):
+            return raw
+    return None
+
+
+def garmin_is_awake(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> bool:
+    """True once Garmin has published this morning, not merely a live sensor.
+
+    Morning training readiness is Garmin's after-wakeup snapshot. It counts when
+    that sensor changed today and any ``calendarDate`` on it is today. A new
+    sleep score (``last_changed`` today) counts too: the watch keeps yesterday's
+    number until the new night syncs, which on this install happens at wake.
+    Body battery, steps, and a state of ``unknown`` do not.
+    """
+    morning = states.get(GARMIN_MORNING_READINESS)
+    morning_raw = state_value(morning)
+    if not is_unavailable(morning_raw) and _garmin_readiness_score(morning_raw)[0] is not None:
+        if _changed_today(morning, tz, today):
+            dated = _calendar_date_attr(morning, tz)
+            if dated is None or dated == today:
+                return True
+    sleep = states.get(GARMIN_SLEEP_SCORE)
+    sleep_raw = state_value(sleep)
+    if is_unavailable(sleep_raw) or parse_float(sleep_raw) is None:
+        return False
+    return _changed_today(sleep, tz, today)
+
+
+def garmin_sleep_for_vote(
+    states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date
+) -> float | None:
+    """Today's Garmin sleep score, or None while yesterday's value is still held."""
+    if not garmin_is_awake(states, tz, today):
+        return None
+    morning = states.get(GARMIN_MORNING_READINESS)
+    if _changed_today(morning, tz, today):
+        from_attr = attr(morning, "sleep_score")
+        if not is_unavailable(from_attr):
+            parsed = parse_float(from_attr)
+            if parsed is not None:
+                return parsed
+    sleep = states.get(GARMIN_SLEEP_SCORE)
+    if _changed_today(sleep, tz, today):
+        raw = state_value(sleep)
+        if not is_unavailable(raw):
+            return parse_float(raw)
+    return None
+
+
+_HOUR_UNITS = {"h", "hr", "hrs", "hour", "hours"}
+_MINUTE_UNITS = {"min", "mins", "minute", "minutes"}
+
+
+def garmin_recovery_hours(entity: dict[str, Any] | None) -> float | None:
+    raw = parse_float(state_value(entity))
+    if raw is None:
+        return None
+    unit = attr(entity, "unit_of_measurement")
+    unit_s = "" if is_unavailable(unit) else str(unit).strip().lower()
+    if unit_s in _HOUR_UNITS:
+        return raw
+    if unit_s in _MINUTE_UNITS:
+        return raw / 60.0
+    return raw / 60.0 if raw > 48 else raw
+
+
+def score_recovery(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> Recovery:
+    rest_mode = parse_bool(state_value(states.get(OURA_REST_MODE))) or False
+    oura_readiness = parse_float(state_value(states.get(OURA_READINESS)))
+    oura_sleep = parse_float(state_value(states.get(OURA_SLEEP)))
+    oura_hrv = parse_float(state_value(states.get(OURA_SLEEP_HRV)))
+    oura_hrv_balance = parse_float(state_value(states.get(OURA_HRV_BALANCE)))
+    oura_temp = parse_float(state_value(states.get(OURA_TEMP)))
+    awake = garmin_is_awake(states, tz, today)
+    readiness_raw = _usable_readiness(states)
+    if readiness_raw is None:
+        garmin_score, garmin_text = None, None
+    else:
+        garmin_score, garmin_text = _garmin_readiness_score(readiness_raw)
+    body_battery = parse_float(state_value(states.get(GARMIN_BODY_BATTERY)))
+    recovery_hours = garmin_recovery_hours(states.get(GARMIN_RECOVERY_TIME))
+    hrv_status = state_value(states.get(GARMIN_HRV_STATUS))
+    hrv_status_s = None if is_unavailable(hrv_status) else str(hrv_status)
+    night = parse_float(state_value(states.get(GARMIN_HRV_NIGHT)))
+    baseline = parse_float(state_value(states.get(GARMIN_HRV_BASELINE)))
+    hrv_ratio = (night / baseline) if night and baseline else None
+
+    poor_votes = 0
+    good_votes = 0
+    reasons: list[str] = []
+
+    if rest_mode:
+        poor_votes += 3
+        reasons.append("Oura rest mode is on")
+
+    def vote_score(name: str, value: float | None, poor_below: float, good_at: float) -> None:
+        nonlocal poor_votes, good_votes
+        if value is None:
+            return
+        if value < poor_below:
+            poor_votes += 1
+            reasons.append(f"{name} is low ({value:g})")
+        elif value >= good_at:
+            good_votes += 1
+
+    vote_score("Oura readiness", oura_readiness, 60, 75)
+    vote_score("Oura sleep", oura_sleep, 60, 75)
+    # Garmin's preserved sleep score, overnight HRV, and body battery keep
+    # moving or sitting on yesterday until the wake snapshot exists.
+    if awake:
+        vote_score("Garmin sleep", garmin_sleep_for_vote(states, tz, today), 60, 75)
+        vote_score("Garmin training readiness", garmin_score, 55, 75)
+        vote_score("Body battery", body_battery, 30, 60)
+
+    if oura_hrv_balance is not None and oura_hrv_balance < 70:
+        poor_votes += 1
+        reasons.append(f"HRV balance is low ({oura_hrv_balance:g})")
+    elif oura_hrv_balance is not None and oura_hrv_balance >= 80:
+        good_votes += 1
+
+    if awake and hrv_ratio is not None and hrv_ratio < 0.9:
+        poor_votes += 1
+        reasons.append(f"overnight HRV is below baseline ({hrv_ratio:.2f})")
+    elif awake and hrv_ratio is not None and hrv_ratio >= 1.0:
+        good_votes += 1
+
+    if awake and hrv_status_s and hrv_status_s.lower() in {"unbalanced", "low", "poor"}:
+        poor_votes += 1
+        reasons.append(f"Garmin HRV status is {hrv_status_s}")
+
+    if oura_temp is not None and abs(oura_temp) >= 0.5:
+        poor_votes += 1
+        reasons.append(f"temperature deviation is {oura_temp:g}°C")
+
+    if awake and recovery_hours is not None and recovery_hours >= 24:
+        poor_votes += 1
+        reasons.append(f"Garmin still wants {recovery_hours:.0f}h recovery")
+    elif awake and recovery_hours is not None and recovery_hours <= 8:
+        good_votes += 1
+
+    if rest_mode or poor_votes >= 2 or (oura_readiness is not None and oura_readiness < 55):
+        band = "poor"
+    elif good_votes >= 3 and poor_votes == 0 and (oura_readiness is None or oura_readiness >= 75):
+        band = "good"
+    elif poor_votes == 0 and (oura_readiness is None or oura_readiness >= 70) and good_votes >= 1:
+        band = "good"
+    else:
+        band = "ok"
+
+    if not reasons:
+        reasons.append(f"recovery band is {band}")
+
+    return Recovery(
+        band=band,
+        rest_mode=rest_mode,
+        oura_readiness=oura_readiness,
+        oura_sleep=oura_sleep,
+        oura_hrv=oura_hrv,
+        oura_hrv_balance=oura_hrv_balance,
+        oura_temp=oura_temp,
+        garmin_readiness=garmin_score,
+        garmin_readiness_text=garmin_text,
+        garmin_body_battery=body_battery,
+        garmin_recovery_hours=recovery_hours,
+        garmin_hrv_status=hrv_status_s,
+        garmin_hrv_ratio=hrv_ratio,
+        reasons=reasons,
+    )
+
+
+def collect_strava_sessions(
+    states: dict[str, dict[str, Any]],
+    settings: Settings,
+    hr_max: float | None = None,
+) -> list[Session]:
+    sessions: list[Session] = []
+    seen: set[tuple] = set()
+    for slot in all_strava_slot_ids(settings.strava_entity_prefix):
+        session = session_from_strava_slot(
+            states.get(slot.activity),
+            states.get(slot.date),
+            states.get(slot.distance),
+            states.get(slot.moving_time),
+            states.get(slot.elapsed_time),
+            states.get(slot.average_heartrate),
+            states.get(slot.max_heartrate),
+            settings.tz,
+            settings.long_run_min_minutes,
+            hr_max=hr_max,
+        )
+        if not session:
+            continue
+        if session.activity_id:
+            key: tuple = ("id", str(session.activity_id))
+        else:
+            key = (
+                "t",
+                session.title,
+                session.when.isoformat() if session.when else None,
+                round(session.duration_min or 0, 1),
+                round(session.distance_m or 0, 0),
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        sessions.append(session)
+    return sessions
+
+
+def merge_history_sessions(
+    existing: list[Session],
+    history: list[list[dict[str, Any]]],
+    tz: ZoneInfo,
+    long_run_min_minutes: int,
+) -> list[Session]:
+    """Use HA history of per-sport date sensors if a session rolled off the 10 slots."""
+    from coach.classify import STRENGTH, classify_sport
+
+    known_dates = {s.when for s in existing if s.when}
+    extra: list[Session] = []
+    for series in history or []:
+        if not series:
+            continue
+        entity_id = series[0].get("entity_id") or series[-1].get("entity_id") or ""
+        sport = "Run" if "_run_" in entity_id else "WeightTraining" if "weight_training" in entity_id else ""
+        if not sport:
+            continue
+        for point in series:
+            when = parse_date(point.get("state"), tz)
+            if not when or when in known_dates:
+                continue
+            session_type = classify_sport(sport, sport, None, None, None, long_run_min_minutes)
+            extra.append(
+                Session(
+                    session_type=session_type if sport != "WeightTraining" else STRENGTH,
+                    title=sport,
+                    sport=sport,
+                    when=when,
+                    source="history",
+                )
+            )
+            known_dates.add(when)
+    return merge_training_sessions(existing, extra)
+
+
+def collect_garmin_sessions(
+    states: dict[str, dict[str, Any]],
+    settings: Settings,
+    hr_max: float | None = None,
+) -> list[Session]:
+    """Completed Garmin activities only — planned `last_workout` is ignored."""
+    sessions: list[Session] = []
+    seen: set[str] = set()
+    activities_entity = first_entity(
+        states, GARMIN_LAST_ACTIVITIES, GARMIN_LAST_ACTIVITIES_FALLBACK
+    )
+    raw_list = attr(activities_entity, "last_activities") or attr(activities_entity, "activities") or []
+    if isinstance(raw_list, list):
+        for item in raw_list:
+            if not isinstance(item, dict):
+                continue
+            session = session_from_garmin_activity(
+                item, settings.tz, settings.long_run_min_minutes, hr_max=hr_max
+            )
+            if not session:
+                continue
+            if session.activity_id:
+                if session.activity_id in seen:
+                    continue
+                seen.add(session.activity_id)
+            sessions.append(session)
+    last = session_from_garmin_entity(
+        first_entity(states, GARMIN_LAST_ACTIVITY, GARMIN_LAST_ACTIVITY_FALLBACK),
+        settings.tz,
+        settings.long_run_min_minutes,
+        hr_max=hr_max,
+    )
+    if last and (not last.activity_id or last.activity_id not in seen):
+        sessions.append(last)
+    return sessions
+
+
+def _max_num(*values: float | None) -> float | None:
+    nums = [value for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def collect_day_activity(states: dict[str, dict[str, Any]]) -> DayActivity:
+    """Oura daily Activity + Garmin totals. Does not use Oura sport workouts."""
+    oura_score = parse_float(state_value(states.get(OURA_ACTIVITY_SCORE)))
+    oura_steps = parse_float(state_value(states.get(OURA_STEPS)))
+    oura_kcal = parse_float(state_value(states.get(OURA_ACTIVE_CALORIES)))
+    oura_high = parse_float(state_value(states.get(OURA_HIGH_ACTIVITY_TIME)))
+    oura_medium = parse_float(state_value(states.get(OURA_MEDIUM_ACTIVITY_TIME)))
+    garmin_steps = parse_float(
+        state_value(first_entity(states, GARMIN_TOTAL_STEPS, GARMIN_TOTAL_STEPS_FALLBACK))
+    )
+    garmin_yesterday = parse_float(state_value(first_entity(states, GARMIN_YESTERDAY_STEPS)))
+    garmin_kcal = parse_float(
+        state_value(first_entity(states, GARMIN_ACTIVE_CALORIES, GARMIN_ACTIVE_CALORIES_FALLBACK))
+    )
+    garmin_intensity = parse_float(
+        state_value(
+            first_entity(states, GARMIN_INTENSITY_MINUTES, GARMIN_INTENSITY_MINUTES_FALLBACK)
+        )
+    )
+    oura_intensity = None
+    if oura_high is not None or oura_medium is not None:
+        oura_intensity = (oura_high or 0.0) + (oura_medium or 0.0)
+    return DayActivity(
+        oura_score=oura_score,
+        oura_steps=oura_steps,
+        oura_active_kcal=oura_kcal,
+        oura_high_min=oura_high,
+        oura_medium_min=oura_medium,
+        garmin_steps=garmin_steps,
+        garmin_yesterday_steps=garmin_yesterday,
+        garmin_active_kcal=garmin_kcal,
+        garmin_intensity_min=garmin_intensity,
+        steps=_max_num(oura_steps, garmin_steps),
+        yesterday_steps=garmin_yesterday,
+        active_kcal=_max_num(oura_kcal, garmin_kcal),
+        intensity_min=_max_num(garmin_intensity, oura_intensity),
+    )
+
+
+def add_activity_reasons(recovery: Recovery, activity: DayActivity) -> None:
+    """Note high NEAT on the recovery snapshot; does not change the band."""
+    steps = activity.insight_steps
+    if steps is not None and steps >= 12000:
+        recovery.reasons.append(f"day activity is {steps / 1000.0:.1f}k steps")
+    elif activity.intensity_min is not None and activity.intensity_min >= 45:
+        recovery.reasons.append(f"day activity is {activity.intensity_min:.0f} intensity min")
+
+
+def already_trained_on(sessions: list[Session], day: date) -> bool:
+    return any(session_day(s) == day and is_training_session(s) for s in sessions)
+
+
+def oura_is_synced_today(states: dict[str, dict[str, Any]], tz: ZoneInfo, today: date) -> bool:
+    updated = last_updated(states.get(OURA_READINESS), tz)
+    if updated and updated.date() == today:
+        return True
+    sleep_updated = last_updated(states.get(OURA_SLEEP), tz)
+    return bool(sleep_updated and sleep_updated.date() == today)
+
+
+def collect_live_sessions(
+    states: dict[str, dict[str, Any]],
+    settings: Settings,
+    history: list[list[dict[str, Any]]] | None = None,
+    split_history: list[list[dict[str, Any]]] | None = None,
+    hr_max: float | None = None,
+) -> list[Session]:
+    """Classify sport sessions from Strava and Garmin (never Oura workouts)."""
+    sessions = collect_strava_sessions(states, settings, hr_max=hr_max)
+    garmin = collect_garmin_sessions(states, settings, hr_max=hr_max)
+    sessions = merge_training_sessions(sessions, garmin)
+    if history:
+        sessions = merge_history_sessions(
+            sessions, history, settings.tz, settings.long_run_min_minutes
+        )
+        sessions = merge_training_sessions(sessions)
+    split_sets = collect_split_sets(
+        states.get(STRAVA_LATEST_SPLITS),
+        split_history,
+        settings.tz,
+    )
+    if split_sets:
+        sessions = apply_splits_to_sessions(
+            sessions, split_sets, settings.long_run_min_minutes, hr_max=hr_max
+        )
+        sessions = merge_training_sessions(sessions)
+    return sessions
+
+
+def build_snapshot(
+    states: dict[str, dict[str, Any]],
+    settings: Settings,
+    now: datetime | None = None,
+    history: list[list[dict[str, Any]]] | None = None,
+    split_history: list[list[dict[str, Any]]] | None = None,
+    sessions: list[Session] | None = None,
+) -> FeatureSnapshot:
+    now = now or datetime.now(settings.tz)
+    today = now.date()
+    recovery = score_recovery(states, settings.tz, today)
+    activity = collect_day_activity(states)
+    add_activity_reasons(recovery, activity)
+    if sessions is None:
+        sessions = collect_live_sessions(states, settings, history, split_history)
+    else:
+        sessions = merge_training_sessions(sessions)
+    already = already_trained_on(sessions, today)
+    sessions = sorted(
+        sessions,
+        key=lambda s: (
+            session_day(s) or date.min,
+            s.started_at.timestamp() if s.started_at else 0.0,
+        ),
+        reverse=True,
+    )
+    return FeatureSnapshot(
+        now=now,
+        today=today,
+        recovery=recovery,
+        sessions=sessions,
+        oura_synced_today=oura_is_synced_today(states, settings.tz, today),
+        already_trained_today=already,
+        garmin_awake=garmin_is_awake(states, settings.tz, today),
+        activity=activity,
+    )
+
+
+def sessions_since(snapshot: FeatureSnapshot, start: date) -> list[Session]:
+    out: list[Session] = []
+    for session in snapshot.sessions:
+        when = session_day(session)
+        if when and when >= start:
+            out.append(session)
+    return out
+
+
+def yesterday_session(snapshot: FeatureSnapshot) -> Session | None:
+    """Most taxing training session from yesterday (hard/long over easy/gym)."""
+    target = snapshot.today - timedelta(days=1)
+    candidates = [
+        s
+        for s in snapshot.sessions
+        if session_day(s) == target and is_training_session(s)
+    ]
+    if not candidates:
+        return None
+
+    def rank(session: Session) -> tuple:
+        hard = 0 if session.session_type in HARD_OR_LONG else 1
+        start = session.started_at.timestamp() if session.started_at else 0.0
+        return (hard, -(session.duration_min or 0), -start)
+
+    return sorted(candidates, key=rank)[0]

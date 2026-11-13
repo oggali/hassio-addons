@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
 from datetime import datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-ROOT = Path(__file__).resolve().parents[1] / "app"
-sys.path.insert(0, str(ROOT))
+import _path  # noqa: F401
 
-from classify import EASY_RUN, INTERVALS, TEMPO, Session, classify_logged_session  # noqa: E402
-from splits import SplitSet, apply_splits_to_sessions, classify_from_splits, parse_split_entity  # noqa: E402
-from entities import STRAVA_LATEST_SPLITS  # noqa: E402
-from features import build_snapshot  # noqa: E402
-from settings import Settings  # noqa: E402
+from coach.classify import EASY_RUN, INTERVALS, TEMPO, Session, classify_logged_session  # noqa: E402
+from coach.splits import SplitSet, apply_splits_to_sessions, classify_from_splits, parse_split_entity  # noqa: E402
+from coach.entities import STRAVA_LATEST_SPLITS  # noqa: E402
+from coach.features import build_snapshot  # noqa: E402
+from coach.settings import Settings  # noqa: E402
 from test_planner import SATURDAY, add_strava, entity, good_recovery  # noqa: E402
 
 TZ = ZoneInfo("Europe/Helsinki")

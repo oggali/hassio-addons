@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
 from datetime import date, timedelta
 from unittest.mock import MagicMock
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+import _path  # noqa: F401
 
-from classify import EASY_RUN, INTERVALS, LONG_RUN, REST, STRENGTH, TEMPO, Session  # noqa: E402
-from entities import (  # noqa: E402
+from coach.classify import EASY_RUN, INTERVALS, LONG_RUN, REST, STRENGTH, TEMPO, Session  # noqa: E402
+from coach.entities import (  # noqa: E402
     GARMIN_BODY_BATTERY,
     GARMIN_HRV_BASELINE,
     GARMIN_HRV_NIGHT,
@@ -25,8 +22,8 @@ from entities import (  # noqa: E402
     OURA_SLEEP_HRV,
     OURA_TEMP,
 )
-from features import DayActivity, build_snapshot  # noqa: E402
-from feedback import (  # noqa: E402
+from coach.features import DayActivity, build_snapshot  # noqa: E402
+from coach.feedback import (  # noqa: E402
     ACK_TIMEOUT_SECONDS,
     TAG_CHECKIN_COMP,
     TAG_CHECKIN_EFFORT,
@@ -45,15 +42,15 @@ from feedback import (  # noqa: E402
     recap_text,
     resolve_tomorrow_row,
 )
-from goal import Prefs  # noqa: E402
-from load import build_load_snapshot  # noqa: E402
+from coach.goal import Prefs  # noqa: E402
+from coach.load import build_load_snapshot  # noqa: E402
 from main import handle_mobile_action, notify_message, notify_plan  # noqa: E402
-from paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
-from periodize import build_skeleton  # noqa: E402
-from planner import Plan, plan_day  # noqa: E402
-from recipes import Recipe  # noqa: E402
-from settings import Settings  # noqa: E402
-from simulate import finish_distribution, search_calendar  # noqa: E402
+from coach.paces import build_paces, easy_pace_min_km, format_pace, riegel  # noqa: E402
+from coach.periodize import build_skeleton  # noqa: E402
+from coach.planner import Plan, plan_day  # noqa: E402
+from coach.recipes import Recipe  # noqa: E402
+from coach.settings import Settings  # noqa: E402
+from coach.simulate import finish_distribution, search_calendar  # noqa: E402
 
 TZ = ZoneInfo("Europe/Helsinki")
 SATURDAY = date(2026, 8, 22)
@@ -167,7 +164,7 @@ class PeriodizeTests(unittest.TestCase):
         self.assertGreaterEqual(load.long_km, 15.5)
 
     def test_quality_structure_varies_by_distance(self):
-        from periodize import interval_structure
+        from coach.periodize import interval_structure
 
         five = interval_structure(Prefs(race_distance="5k"), [], None, "build")
         half = interval_structure(Prefs(race_distance="half"), [], None, "build")
@@ -177,7 +174,7 @@ class PeriodizeTests(unittest.TestCase):
         self.assertNotEqual(five[0], mara[0])
 
     def test_interval_ladder_holds_after_skip(self):
-        from periodize import interval_structure
+        from coach.periodize import interval_structure
 
         prefs = Prefs(race_distance="5k")
         last = _session(INTERVALS, SATURDAY - timedelta(days=3), 8, 50, title="intervals")
@@ -550,7 +547,7 @@ class OverlayTests(unittest.TestCase):
         }
         from datetime import datetime as dt
 
-        from periodize import PlanDay
+        from coach.periodize import PlanDay
 
         snap = build_snapshot(states, settings, now=dt(2026, 8, 22, 7, 30, tzinfo=TZ))
         intended = PlanDay(
@@ -569,7 +566,7 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(plan.recovery_band, "poor")
 
     def test_recipe_km_pace_formatting(self):
-        from recipes import build_recipe
+        from coach.recipes import build_recipe
 
         recipe = build_recipe(
             EASY_RUN,
@@ -586,7 +583,7 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("6:30", recipe.title)
 
     def test_no_race_recipe_uses_history_ranges(self):
-        from recipes import build_recipe
+        from coach.recipes import build_recipe
 
         sessions = [_session(EASY_RUN, SATURDAY - timedelta(days=1), 8, 48)]
         paces = build_paces(sessions, Prefs.defaults(), SATURDAY)
@@ -604,7 +601,7 @@ class WeekdayLockCalendarTests(unittest.TestCase):
         return build_skeleton(today, prefs, load, paces, sessions, locks=locks)
 
     def test_empty_locks_keep_the_default_week(self):
-        from periodize import week_template
+        from coach.periodize import week_template
 
         self.assertEqual(
             week_template(Prefs.defaults()),
@@ -626,13 +623,13 @@ class WeekdayLockCalendarTests(unittest.TestCase):
                 self.assertNotIn(day.session_type, {INTERVALS, TEMPO, LONG_RUN})
 
     def test_zero_long_quota_places_no_long_without_a_lock(self):
-        from periodize import week_template
+        from coach.periodize import week_template
 
         types = week_template(Prefs(weekly_long_runs=0))
         self.assertNotIn(LONG_RUN, types)
 
     def test_locked_long_above_the_quota_stays(self):
-        from periodize import week_template
+        from coach.periodize import week_template
 
         types = week_template(Prefs(weekly_long_runs=0), {5: LONG_RUN, 0: INTERVALS})
         self.assertEqual(types[0], INTERVALS)
@@ -652,8 +649,8 @@ class WeekdayLockCalendarTests(unittest.TestCase):
     def test_search_leaves_a_locked_day_alone(self):
         import random
 
-        from periodize import PlanDay
-        from simulate import _mutate, _safe_volume
+        from coach.periodize import PlanDay
+        from coach.simulate import _mutate, _safe_volume
 
         today = date(2026, 8, 24)
         locked = PlanDay(today, INTERVALS, 8, 10, 4.2, 4.5, "6×800 m", "base", "lock")

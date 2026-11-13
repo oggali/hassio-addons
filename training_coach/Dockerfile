@@ -9,6 +9,7 @@ RUN apt-get update \
         python3-wheel \
     && rm -rf /var/lib/apt/lists/*
 
+COPY core /core
 COPY app /app
 RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
 

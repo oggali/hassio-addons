@@ -1,0 +1,20 @@
+#!/bin/sh
+# Refresh training_coach/core when a commit already touches that add-on.
+# Other add-ons stay out of this, so a ruuvibridge commit does not ship a coach snapshot.
+set -e
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '^training_coach/'; then
+  exit 0
+fi
+
+python3 "$root/training_coach/scripts/sync_core.py"
+git add -A -- training_coach/core
+
+if ! git diff --cached --quiet -- training_coach/core; then
+  if ! git diff --cached -U0 -- training_coach/config.yaml | grep -q '^+version:'; then
+    echo "training_coach/core changed. Bump version in training_coach/config.yaml and stage it." >&2
+    exit 1
+  fi
+fi

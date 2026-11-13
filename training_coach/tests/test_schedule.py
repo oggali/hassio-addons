@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+import _path  # noqa: F401
 
 from main import (  # noqa: E402
     MIN_WAKE_WAIT_MINUTES,
@@ -23,7 +21,7 @@ from main import (  # noqa: E402
     should_fire_named_event,
     should_log_wait,
 )
-from settings import Settings  # noqa: E402
+from coach.settings import Settings  # noqa: E402
 from store import CoachStore  # noqa: E402
 
 TZ = ZoneInfo("Europe/Helsinki")

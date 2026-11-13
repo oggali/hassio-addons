@@ -4,11 +4,11 @@
 
 Telegram (`notify_service`) is the notify entity for one chat, for example `notify.telegram_bot_5606541988_90421249`. Android (`mobile_notify_service`) receives the morning message when that service is set. The evening recap goes to Telegram; the phone gets the same recap on the first card, then short follow-up cards. Categories and buttons are in [Evening feedback](feedback.md). The load numbers are in [Training load](load.md).
 
-[`notify_message`](../app/main.py#L465-L499) calls `telegram_bot.send_message` with that entity as `entity_id` and `parse_mode` set to `plain_text`. Home Assistant removed the legacy `notify.<name>` service, and `notify.send_message` cannot set a parser. The bot’s default parser is legacy Markdown, where `_` starts italics. `same_family` in the evening recap, and helper entity ids when Android is off, have no closing `_`, so Telegram rejects the message and nothing is delivered. Android cards do not set a parse mode.
+[`notify_message`](../app/main.py#L471-L505) calls `telegram_bot.send_message` with that entity as `entity_id` and `parse_mode` set to `plain_text`. Home Assistant removed the legacy `notify.<name>` service, and `notify.send_message` cannot set a parser. The bot’s default parser is legacy Markdown, where `_` starts italics. `same_family` in the evening recap, and helper entity ids when Android is off, have no closing `_`, so Telegram rejects the message and nothing is delivered. Android cards do not set a parse mode.
 
 ## Morning
 
-[`notify_plan`](../app/main.py#L502-L522) sends this when the morning slot runs and the add-on is allowed to notify. The slot waits until Oura looks updated today and Garmin has a wake snapshot (see [Recovery bands](recovery.md)). The wait ends at `run_time` plus `oura_wait_minutes`, and not before three hours. After that the plan is sent from Oura, without yesterday’s Garmin sleep score or the in-bed body battery. A startup plan notifies only if `run_time` has already passed and today’s morning notify has not been sent, and that notify uses the same wait.
+[`notify_plan`](../app/main.py#L508-L528) sends this when the morning slot runs and the add-on is allowed to notify. The slot waits until Oura looks updated today and Garmin has a wake snapshot (see [Recovery bands](recovery.md)). The wait ends at `run_time` plus `oura_wait_minutes`, and not before three hours. After that the plan is sent from Oura, without yesterday’s Garmin sleep score or the in-bed body battery. A startup plan notifies only if `run_time` has already passed and today’s morning notify has not been sent, and that notify uses the same wait.
 
 ```
 Today: Easy run
@@ -28,7 +28,7 @@ The upcoming block is the next seven calendar rows. Without a race, those rows a
 
 ## Evening
 
-[`recap_text`](../app/feedback.py#L305-L353) builds the Telegram message and the first Android card ([`run_evening`](../app/main.py#L756-L842)):
+[`recap_text`](../core/src/coach/feedback.py#L305-L353) builds the Telegram message and the first Android card ([`run_evening`](../app/main.py#L762-L848)):
 
 ```
 This morning: Easy run
@@ -38,7 +38,7 @@ Training load: today 24, 7-day 186.
 Day activity: 11.0k steps, 430 kcal (Garmin + Oura).
 ```
 
-`today` is session load dated today. `7-day` is that same rolling sum, now including today. Both come from the snapshot written to `load_daily` at check-in ([`format_load_line`](../app/feedback.py#L257-L270)). A rest day with nothing logged prints `today 0`.
+`today` is session load dated today. `7-day` is that same rolling sum, now including today. Both come from the snapshot written to `load_daily` at check-in ([`format_load_line`](../core/src/coach/feedback.py#L257-L270)). A rest day with nothing logged prints `today 0`.
 
 Day activity (steps, calories, intensity minutes) is a separate line. Those figures are not added into training load.
 

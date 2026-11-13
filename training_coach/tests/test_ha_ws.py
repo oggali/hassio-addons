@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+import _path  # noqa: F401
 
 import ha_ws  # noqa: E402
 from ha_ws import HaWebsocket  # noqa: E402

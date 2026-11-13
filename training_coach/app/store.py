@@ -10,13 +10,13 @@ from typing import Any
 
 import duckdb
 
-from classify import Session
-from features import Recovery
-from goal import Prefs, normalize_race_distance
-from load import LoadSnapshot, annotate_session_banister, session_load
-from parse import coerce_date
-from planner import Plan
-from settings import Settings
+from coach.classify import Session
+from coach.features import Recovery
+from coach.goal import Prefs, normalize_race_distance
+from coach.load import LoadSnapshot, annotate_session_banister, session_load
+from coach.parse import coerce_date
+from coach.planner import Plan
+from coach.settings import Settings
 
 SCHEMA_VERSION = "8"
 
