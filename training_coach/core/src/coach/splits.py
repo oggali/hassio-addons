@@ -110,8 +110,14 @@ def _km_paces(splits: list[dict[str, Any]]) -> list[float]:
 
 
 def classify_from_splits(split_set: SplitSet) -> str | None:
-    """Return intervals/tempo when the split or lap pattern is clear."""
+    """Return intervals/tempo when the split or lap pattern is clear.
+
+    Repeating laps win over kilometre splits. A 400 m session blends each rep
+    and its jog into one kilometre, and that kilometre band looks like tempo.
+    """
     from_laps = _classify_laps(split_set.laps)
+    if from_laps == INTERVALS:
+        return INTERVALS
     paces = _km_paces(split_set.splits)
     if len(paces) < 3:
         return from_laps

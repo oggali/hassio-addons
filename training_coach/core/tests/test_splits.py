@@ -71,6 +71,23 @@ class SplitClassifyTests(unittest.TestCase):
         )
         self.assertEqual(classify_from_splits(split_set), TEMPO)
 
+    def test_repeat_laps_beat_a_tempo_looking_kilometre_band(self):
+        """400 m reps blend into ~5:00 kilometres. The laps are the intervals."""
+        laps = []
+        for index in range(7):
+            laps.append({"name": f"Lap {index * 2}", "distance_m": 400, "moving_time_s": 104, "pace_min_km": 4.33})
+            laps.append({"name": f"Lap {index * 2 + 1}", "distance_m": 350, "moving_time_s": 120, "pace_min_km": 5.71})
+        split_set = SplitSet(
+            activity_id="21061100925",
+            activity_name="Evening Run",
+            activity_type="Run",
+            distance_m=8920,
+            moving_time_s=2800,
+            splits=km_splits(5.56, 5.21, 5.01, 5.17, 4.98, 5.19, 5.24, 5.10, 5.68),
+            laps=laps,
+        )
+        self.assertEqual(classify_from_splits(split_set), INTERVALS)
+
     def test_even_easy_is_not_quality(self):
         split_set = SplitSet(
             activity_id="3",

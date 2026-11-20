@@ -182,10 +182,25 @@ def next_quality(last_quality_type: str | None) -> str:
     return INTERVALS
 
 
+def _tomorrow_calendar_hard(upcoming: list[dict] | None, today: date) -> bool:
+    """True when the calendar already has a hard or long day tomorrow."""
+    target = (today + timedelta(days=1)).isoformat()
+    for item in upcoming or []:
+        day = item.get("day")
+        if hasattr(day, "isoformat"):
+            day = day.isoformat()
+        if str(day)[:10] != target:
+            continue
+        kind = item.get("session") or item.get("session_type")
+        return kind in HARD_OR_LONG
+    return False
+
+
 def pick_session_type(
     snapshot: FeatureSnapshot,
     prefs: Prefs,
     locks: dict[int, str] | None = None,
+    tomorrow_planned_hard: bool = False,
 ) -> tuple[str, str]:
     recovery = snapshot.recovery
     locks = locks or {}
@@ -248,6 +263,7 @@ def pick_session_type(
         hours_since_hard >= HARD_SPACING_HOURS
         and yesterday_type not in HARD_OR_LONG
         and not tomorrow_locked_hard
+        and not tomorrow_planned_hard
     )
 
     if long_open and weekend and can_hard:
@@ -425,7 +441,12 @@ def plan_day(
                 paces=paces,
             )
     else:
-        session_type, why = pick_session_type(snapshot, prefs, locks)
+        session_type, why = pick_session_type(
+            snapshot,
+            prefs,
+            locks,
+            tomorrow_planned_hard=_tomorrow_calendar_hard(upcoming, snapshot.today),
+        )
         recipe = build_recipe(session_type, snapshot.sessions, yesterday_type, paces=paces)
     if prediction and prefs.has_race and prediction.get("feasible") is False:
         why = (

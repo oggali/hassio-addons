@@ -558,6 +558,16 @@ class WeekdayLockCalendarTests(unittest.TestCase):
             if day.day.weekday() in {1, 6}:
                 self.assertNotIn(day.session_type, {INTERVALS, TEMPO, LONG_RUN})
 
+    def test_quality_is_not_placed_the_day_before_the_long_run(self):
+        from coach.periodize import week_template
+
+        types = week_template(
+            Prefs.defaults(),
+            {0: STRENGTH, 1: STRENGTH, 2: STRENGTH, 3: REST},
+        )
+        self.assertEqual(types[5], LONG_RUN)
+        self.assertNotIn(types[4], {INTERVALS, TEMPO, LONG_RUN})
+
     def test_zero_long_quota_places_no_long_without_a_lock(self):
         from coach.periodize import week_template
 
