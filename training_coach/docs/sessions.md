@@ -96,16 +96,18 @@ Order:
 
 ## Splits
 
-`sensor.strava_latest_splits` can reclassify a **run** after the title pass. Strength and cross types are left alone ([`_reclassify`](../core/src/coach/splits.py#L259-L282)). The same reference max is passed through, so attaching splits does not put the activity’s own peak back in the denominator. Kilometre splits and laps from that match are stored on the session (`splits_json`, `laps_json`) so a later reclassify still sees them.
+`sensor.strava_latest_splits` can reclassify a **run** after the title pass. Strength and cross types are left alone ([`_reclassify`](../core/src/coach/splits.py#L265-L288)). The same reference max is passed through, so attaching splits does not put the activity’s own peak back in the denominator. Kilometre splits and laps from that match are stored on the session (`splits_json`, `laps_json`) so a later reclassify still sees them.
 
-[`classify_from_splits`](../core/src/coach/splits.py#L112-L158):
+[`classify_from_splits`](../core/src/coach/splits.py#L112-L145):
 
 - Five or more laps, five or more of them 200–1200 m, and at least three laps ≥ 0.35 min/km faster than the median pace → `intervals`. Lap names containing interval/repeat or tempo/threshold do the same.
 - On kilometre splits (pace between 2.5 and 12 min/km): two or more kilometres that are ≥ 0.35 min/km faster than both neighbours → `intervals`.
 - Three or more steady kilometres ≥ 0.35 min/km faster than the first split, with a standard deviation ≤ 0.20 → `tempo`.
 - A wide spread through the middle of the run (standard deviation ≥ 0.40 and range ≥ 0.8 min/km) → `intervals`.
 
-Splits attach by Strava activity id. A title match is used only when the session has no id and exactly one split set fits, so a repeated title such as “Afternoon Run” does not steal the previous run’s id ([`_match_split`](../core/src/coach/splits.py#L232-L256)).
+Lap repeats are `intervals` even when the kilometre splits look like that tempo block. A 400 m session puts one rep and the jog after it into the same kilometre, so those kilometres sit in a tight band and the lap list is what shows the repeats.
+
+Splits attach by Strava activity id. A title match is used only when the session has no id and exactly one split set fits, so a repeated title such as “Afternoon Run” does not steal the previous run’s id ([`_match_split`](../core/src/coach/splits.py#L238-L262)).
 
 ## Garmin and Strava copies of one outing
 

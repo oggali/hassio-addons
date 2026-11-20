@@ -1,4 +1,4 @@
 source: https://github.com/oggali/training-coach
-commit: d583a3caf7e86551dee286f072b7a0e3087bb7f6
+commit: b601352cc2dc2dbb1165e3b187deffc71ab92c71
 path: core
 Reapplied after copy: notify_service notify.telegram_bot_5606541988_90421249.

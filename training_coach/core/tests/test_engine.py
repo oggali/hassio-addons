@@ -101,25 +101,24 @@ class EngineTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(result.plan.session_type, LONG_RUN)
-        self.assertIn("Friday is a reasonable backup", result.plan.why)
+        self.assertNotIn(result.plan.session_type, {LONG_RUN, "intervals", "tempo"})
         saturday = next(day for day in result.calendar if day.day == date(2026, 8, 22))
         sunday = next(day for day in result.calendar if day.day == date(2026, 8, 23))
-        self.assertEqual(saturday.session_type, EASY_RUN)
+        self.assertEqual(saturday.session_type, LONG_RUN)
         self.assertEqual(sunday.session_type, REST)
         message = result.as_dict()["morning_message"]
-        self.assertIn("Sat: easy run", message)
-        self.assertNotIn("Sat: long run", message)
+        self.assertIn("Sat: long run", message)
 
-    def test_friday_intervals_do_not_keep_saturday_long(self):
+    def test_friday_stays_off_intervals_so_saturday_can_be_long(self):
         result = plan_from_payload(
             today=date(2026, 8, 21),
             timezone="Europe/Helsinki",
             recovery={"feel": "good"},
         )
-        self.assertEqual(result.plan.session_type, "intervals")
+        self.assertNotIn(result.plan.session_type, {"intervals", "tempo", LONG_RUN})
         saturday = next(day for day in result.calendar if day.day == date(2026, 8, 22))
-        self.assertEqual(saturday.session_type, EASY_RUN)
+        self.assertEqual(saturday.session_type, LONG_RUN)
+        self.assertIn("Sat: long run", result.as_dict()["morning_message"])
 
     def test_locked_saturday_long_stays_when_friday_cannot_stack_it(self):
         result = plan_from_payload(

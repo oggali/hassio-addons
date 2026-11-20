@@ -169,12 +169,19 @@ def week_template(prefs: Prefs, locks: dict[int, str] | None = None) -> list[str
     quality_pref = [1, 3, 2]  # Tue, Thu, Wed — not adjacent to a typical long
     placed_q = sum(1 for kind in types if kind in QUALITY)
 
+    def next_to_placed_hard(weekday: int) -> bool:
+        return any(
+            adjacent_weekday(weekday, other)
+            for other, kind in enumerate(types)
+            if kind in {LONG_RUN, INTERVALS, TEMPO}
+        )
+
     def place_quality(candidates: list[int] | range) -> None:
         nonlocal placed_q
         for wd in candidates:
             if placed_q >= prefs.weekly_quality_runs:
                 return
-            if blocked_for_hard(wd) or types[wd] != EASY_RUN:
+            if blocked_for_hard(wd) or next_to_placed_hard(wd) or types[wd] != EASY_RUN:
                 continue
             types[wd] = INTERVALS
             placed_q += 1

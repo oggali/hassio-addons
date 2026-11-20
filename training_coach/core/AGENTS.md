@@ -44,6 +44,7 @@ The add-on still has its own copy of these modules. This package is the one the 
 
 - Quality is `intervals` and `tempo` only. `long_run` is taxing and is not quality.
 - Recovery wins over the calendar, locks, and weekly quotas. Change `pick_session_type` and `overlay_calendar` together when the gate is shared.
+- The picker does not schedule a hard day when tomorrow's calendar row is already hard or long. Unlocked quality is not placed on the weekday next to the long run.
 - A published intervals, tempo, or long run clears an unlocked hard or long day tomorrow (`ease_stacked_tomorrow`) before the upcoming list is built. A lock and race day stay.
 - Strava is kept when it and Garmin describe the same outing.
 - A Garmin document counts only when its `calendarDate` is today. Yesterday's sleep must not vote.
